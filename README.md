@@ -227,4 +227,4 @@ python verification/canonical_variants_test.py
 
 ---
 
-*Analysis and code by Kavya Muralidhar. AlphaGenome model and API by Google DeepMind.*
+*Analysis and code by Kavya Amrutham. AlphaGenome model and API by Google DeepMind.*
