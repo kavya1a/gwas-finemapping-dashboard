@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this code or findings, please cite as below."
+title: "Quantile normalization saturates regulatory variant scoring"
+authors:
+  - family-names: "Amrutham"
+    given-names: "Kavya"
+    affiliation: "Barnard College, Columbia University"
+    email: "ka3041@barnard.edu"
+date-released: 2026-04-27
+url: "https://github.com/kavya1a/gwas-finemapping-dashboard"
+abstract: >
+  Quantile-normalized AlphaGenome scores collapse to a near-binary signal on
+  regulatory-enriched variant sets. We demonstrate this saturation on Tewhey 2016
+  MPRA variants and three independent GWAS datasets, and show that raw model
+  outputs restore a 5x improvement in correlation with experimental measurements.
+keywords:
+  - GWAS
+  - regulatory genomics
+  - variant scoring
+  - MPRA
+  - AlphaGenome
+  - quantile normalization
+  - fine-mapping
+license: MIT

@@ -50,7 +50,7 @@ normalization and aggregated across K562/blood-lineage expression tracks (RNA_SE
 
 ### Scatter plot
 
-![Raw delta vs MPRA LFC](tewhey_raw_delta_results.png)
+![Raw delta vs MPRA LFC](figures/tewhey_raw_delta_results.png)
 
 ---
 
