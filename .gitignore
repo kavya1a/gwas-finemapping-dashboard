@@ -1,0 +1,22 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# OS
+.DS_Store
+.Rhistory
+
+# Large genomic index (CADD local lookup)
+whole_genome_SNVs.tsv.gz.tbi
+whole_genome_SNVs.tsv.gz
+
+# Run logs (artifacts, not part of the analysis)
+*.log
+
+# Claude memory (project-local)
+.claude/

@@ -1,0 +1,7 @@
+alphagenome
+pandas
+streamlit
+requests
+python-dotenv
+matplotlib
+plotly

@@ -1,0 +1,203 @@
+config_version: "0.3.0"
+
+# ---------------------------------------------------------------------------
+# Pipeline: fetch + scoring run parameters
+# ---------------------------------------------------------------------------
+pipeline:
+  variants_per_disease: 300
+  variant_timeout_secs: 60          # per-variant AlphaGenome wall-clock limit
+  max_timeout_fraction: 0.10        # cumulative timeout rate → blocker
+  min_success_fraction: 0.50        # per-disease success rate → blocker
+
+# Canonical variants that are ALWAYS fetched and scored regardless of GWAS rank.
+# These anchors are required for cross-run reproducibility and verification tests.
+# Format: rsid / disease / gene / allele_note
+canonical_variant_whitelist:
+  - rsid: rs429358
+    disease: alzheimers
+    gene: APOE
+    note: "APOE ε4 risk allele (T→C); chr19:44908684"
+  - rsid: rs7412
+    disease: alzheimers
+    gene: APOE
+    note: "APOE ε2 allele (T→C at rs7412, chr19:44908822); protective"
+  - rsid: rs7903146
+    disease: t2d
+    gene: TCF7L2
+    note: "canonical T2D signal; chr10:112998590 C→T"
+  - rsid: rs1006737
+    disease: schizophrenia
+    gene: CACNA1C
+    note: "SCZ GWAS lead; L-type calcium channel"
+  - rsid: rs356219
+    disease: parkinsons
+    gene: SNCA
+    note: "SNCA 3′ UTR variant; PD canonical"
+  - rsid: rs34637584
+    disease: parkinsons
+    gene: LRRK2
+    note: "LRRK2 G2019S; rare PD coding variant (MAF ~0.001)"
+  - rsid: rs3764650
+    disease: alzheimers
+    gene: ABCA7
+    note: "ABCA7 AD GWAS signal"
+  - rsid: rs6656401
+    disease: alzheimers
+    gene: CR1
+    note: "CR1 AD GWAS signal"
+
+# ---------------------------------------------------------------------------
+# AlphaGenome model
+# ---------------------------------------------------------------------------
+alphagenome:
+  model_version: "0.6.1"                       # alphagenome Python package version
+  sequence_lengths: [16384, 131072, 524288, 1048576]
+  default_sequence_length: 1048576             # 1 Mb context (SEQ_LEN)
+  interval_half_bp: 524288                     # half-width of scoring window
+  # Any variant within flanking_sequence_min_bp of a chromosome end will receive
+  # scoring_skipped_reason = 'insufficient_flanking_sequence'.
+  flanking_sequence_min_bp: 524288
+
+# ---------------------------------------------------------------------------
+# Composite scoring
+# ---------------------------------------------------------------------------
+scoring:
+  # Weights must sum to 1.0. Splice sub-scores (splice_sites, splice_site_usage,
+  # splice_junctions) are averaged before applying the splicing weight.
+  modality_weights:
+    expression: 0.30      # RNA-seq + CAGE + PRO-cap
+    chromatin: 0.25       # ATAC + DNase + ChIP-Histone
+    tf_binding: 0.15      # ChIP-TF
+    splicing: 0.20        # averaged splice sub-scores
+    contact: 0.05         # contact maps
+    polyadenylation: 0.05 # PAS usage
+
+  rare_variant_discount: 0.80        # multiplier applied when MAF < rare_variant_maf_threshold
+  rare_variant_maf_threshold: 0.01   # MAF below this → rare_variant_caution = True
+
+  # Background distribution
+  quantile_threshold: 0.90   # frac_above_threshold uses this as the cutoff
+
+# ---------------------------------------------------------------------------
+# Tissue profiles (imported from scoring/tissue_config.py — reproduced here
+# as the authoritative human-readable record for each disease)
+# ---------------------------------------------------------------------------
+tissue_profiles:
+  alzheimers:
+    display_name: "Alzheimer's Disease"
+    ontology: "MONDO_0004975"
+    biosample_keywords:
+      - brain
+      - neuron
+      - cortex
+      - hippocampus
+      - microglia
+      - astrocyte
+      - cerebral
+      - frontal
+      - temporal
+      - neuroblast
+      - neural
+      - cerebellum
+      - prefrontal
+    gtex_keywords:
+      - Brain
+
+  schizophrenia:
+    display_name: "Schizophrenia"
+    ontology: "MONDO_0005090"
+    biosample_keywords:
+      - brain
+      - neuron
+      - cortex
+      - hippocampus
+      - prefrontal
+      - striatum
+      - neural
+      - neuroblast
+      - cerebral
+      - frontal
+    gtex_keywords:
+      - Brain
+
+  t2d:
+    display_name: "Type 2 Diabetes"
+    ontology: "MONDO_0005148"
+    biosample_keywords:
+      - pancreas
+      - islet
+      - beta cell
+      - liver
+      - adipose
+      - muscle
+      - hepatocyte
+      - skeletal
+      - insulin
+      - fat
+    gtex_keywords:
+      - Pancreas
+      - Liver
+      - Adipose
+      - Muscle
+
+  parkinsons:
+    display_name: "Parkinson's Disease"
+    ontology: "MONDO_0005180"
+    biosample_keywords:
+      - brain
+      - substantia nigra
+      - striatum
+      - dopamin
+      - neuron
+      - cortex
+      - neural
+      - neuroblast
+      - cerebral
+      - basal ganglia
+      - midbrain
+    gtex_keywords:
+      - Brain
+
+  tewhey_k562:
+    display_name: "K562 / Blood-lineage (Tewhey MPRA)"
+    ontology: "CL_0000597"
+    biosample_keywords:
+      - k562
+      - blood
+      - lymph
+      - lymphoblast
+      - b cell
+      - gm12878
+      - na12878
+      - na19239
+      - hematopoietic
+      - erythro
+      - leukemia
+      - bcell
+      - b-cell
+    gtex_keywords:
+      - Blood
+
+# ---------------------------------------------------------------------------
+# Tewhey MPRA analysis
+# ---------------------------------------------------------------------------
+tewhey:
+  geo_accession: "GSE75661"
+  dataset_7k5_url: "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE75nnn/GSE75661/suppl/GSE75661_7.5k_collapsed_counts.txt.gz"
+  pseudocount: 1.0           # added before log2 to avoid log(0)
+  cadd_rate_per_sec: 2.0     # conservative; CADD soft-bans rapid bursts
+  cadd_retry_on_empty: 1     # empty-response retries before treating as not-found
+  n_bootstrap: 1000          # Spearman CI bootstrap iterations
+  variant_timeout_secs: 60
+  min_expr_correlation: 0.10 # flag-and-stop threshold for expression_subscore
+  max_liftover_loss_pct: 15  # flag-and-stop for coordinate resolution failure
+  max_cadd_fail_pct: 10      # non-halting flag threshold
+
+# ---------------------------------------------------------------------------
+# CADD
+# ---------------------------------------------------------------------------
+cadd:
+  version: "v1.7"
+  genome: "GRCh38"
+  tabix_url: "https://krishna.gs.washington.edu/download/CADD/v1.7/GRCh38/whole_genome_SNVs.tsv.gz"
+  api_base: "https://cadd.gs.washington.edu/api/v1.0/GRCh38-v1.7"
