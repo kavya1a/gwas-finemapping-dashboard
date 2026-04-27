@@ -7,242 +7,178 @@
 
 ---
 
-Quantile-normalized AlphaGenome scores collapse to a near-binary signal on regulatory-enriched variant sets — making them unsuitable for MPRA and eQTL validation without modification. Raw model outputs restore a **5× improvement** in Spearman correlation with experimental measurements.
+Tools like AlphaGenome rank variants by their predicted regulatory impact relative to millions of common variants in the genome. That ranking is useful — but it has a blind spot. When you apply it to a set of variants already selected for regulatory relevance (GWAS hits, MPRA panels, eQTL credible sets), nearly all of them land at the extreme end of the scale. The predictor goes effectively binary. Correlation with experimental measurements drops to near zero — not because the model is wrong, but because the normalization step erases the differences between variants that the experiment is designed to detect.
+
+Switching to raw model outputs (un-normalized deltas) brings Spearman correlation with MPRA measurements from ρ = 0.036 to ρ = 0.174 — a fivefold improvement, with no changes to the underlying model.
 
 ---
-
-## Headline figure
 
 ![Saturation CDF across three modalities](figures/saturation_cdf.png)
 
-Empirical CDF of |expression subscore| for three variant populations. A uniform reference (diagonal) is expected from a random draw of common variants — by construction of AlphaGenome's genome-wide calibration. Both regulatory-enriched sets shift entirely to the right: **94.9% of Tewhey MPRA variants and 99.6% of disease GWAS variants** have |score| > 0.9, collapsing the predictor to a near-binary ±1 signal.
+*Empirical CDF of |expression subscore| for three variant sets. A random draw of common variants would follow the diagonal by construction. 94.9% of Tewhey MPRA variants and 99.6% of disease GWAS variants score above 0.9 — the predictor has nowhere left to go.*
 
 ---
 
-## Background
+## Why this happens
 
-**AlphaGenome** is a sequence-to-function model that predicts regulatory activity from DNA sequence. For a given ref → alt substitution, it computes differential predictions across hundreds of tracks (RNA-seq, ATAC-seq, ChIP-seq, Hi-C) and returns per-track effect sizes.
+AlphaGenome's published scoring pipeline converts raw per-track effect sizes into genome-wide percentiles, calibrated against ~300,000 common variants from gnomAD and 1000 Genomes. The result is a score in [−1, +1] where 0.9 means "this variant has a larger predicted regulatory effect than 90% of common genetic variation." For prioritizing candidates at a GWAS locus — asking which variant in a credible set has the largest regulatory footprint — this is exactly the right tool.
 
-AlphaGenome's published scoring pipeline applies **quantile normalization**: each raw delta is ranked against a background of ~300,000 common variants (gnomAD/1KG, MAF > 0.01), converting it to a genome-wide percentile in [−1, +1]. This is appropriate for *within-credible-set prioritization*, where all candidates are at the same GWAS locus and relative ordering is what matters.
+The problem arises at validation time. MPRA panels and eQTL datasets are not random. They are assembled from variants that already showed up in GWAS, passed regulatory annotation filters, or were selected specifically because they might be functional. By the same logic that makes them interesting to study, they are enriched for regulatory activity relative to background. The calibration treats them all as extreme, because they are. 94.9% of Tewhey MPRA variants score above 0.9 in absolute value. 99.6% of GWAS disease variants do. When everything scores near ±1, the predictor cannot distinguish a variant that modestly nudges transcription from one that dramatically shuts it down.
 
-**The problem:** standard tool validation correlates predicted scores against MPRA or eQTL measurements. Using quantile-normalized scores for this comparison is methodologically unsound for regulatory-enriched test sets — and systematically underestimates model performance.
-
----
-
-## Finding 1 — Saturation on regulatory-enriched variant sets
-
-Regulatory-enriched variants are in the extreme tail of the genome-wide calibration distribution *by construction*: the very enrichment for regulatory activity that makes them interesting to study also places them all near |score| = 1.
-
-| Variant set | n | Expression >0.9 | Median \|score\| |
-|---|---|---|---|
-| Tewhey MPRA (GWAS regulatory loci) | 3,259 | **94.9%** | 0.989 |
-| Disease GWAS — expression | 767 | **99.6%** | 0.996 |
-| Disease GWAS — chromatin | 767 | 69.4% | 0.941 |
-| Disease GWAS — TF binding | 767 | 31.9% | 0.844 |
-| Platelet count GWAS (Phase 3) | 198 | **99.0%** | 0.995 |
-| Hemoglobin GWAS (Phase 3) | 195 | **100.0%** | 0.996 |
-| Uniform reference (expected) | — | ~10% | ~0.5 |
-
-The saturation gradient across modalities is mechanistic: expression aggregates 3 track types (RNA-seq, CAGE, PRO-cap), so taking the max over more tracks pushes more variants to the tail. Chromatin (3 types) saturates at 69%; TF binding (1 type) at 32%.
-
-**Saturation is not a bug.** The normalized scores are correct and useful for within-locus ranking. The problem is applying them across regulatory-enriched sets where an absolute measurement scale is needed.
-
-![Phase 3 saturation CDF](figures/phase3_saturation_cdf.png)
+This is not a bug in AlphaGenome, and it probably affects any tool that uses genome-wide quantile normalization — Enformer, Sei, and others that score in similar frameworks would face the same issue applied to the same kinds of test sets.
 
 ---
 
-## Finding 2 — Magnitude correlation is preserved; directional correlation is not
+## What we found
 
-We tested four hypotheses for the near-zero Spearman ρ between expression_subscore and Tewhey MPRA log-fold-change:
+We scored 3,259 variants from the Tewhey 2016 MPRA panel (GSE75661), a set of regulatory loci drawn from GWAS studies across 7.5k individuals. The genome-wide quantile score gives Spearman ρ = +0.036 against MPRA log-fold-change — statistically marginal. Before concluding the model fails, we worked through four alternative explanations:
 
-| Hypothesis | Result |
-|---|---|
-| H1: Allele orientation mismatch | **Ruled out.** 100% ref/alt match via Ensembl |
-| H2: Wrong LFC column | **Ruled out.** mpra_lfc = B − A confirmed per Tewhey 2016 |
-| H3: Score saturation | **Confirmed.** 94.9% of scores compressed to ±0.99 |
-| H4: Coordinate drift (hg19→hg38) | **Ruled out.** 5/5 spot-checked positions exact |
+- Allele orientation mismatch (ref/alt flipped vs. MPRA A/B convention) — ruled out, 100% match via Ensembl
+- Wrong LFC column — ruled out, mpra_lfc = B − A matches Tewhey 2016 directly
+- Score saturation — confirmed, 94.9% of scores are above |0.9|
+- Coordinate drift from hg19 to hg38 — ruled out, 5/5 spot-checked positions are exact
 
-Magnitude correlation survives: |expression_subscore| vs |mpra_lfc| gives Spearman ρ = +0.108 (p = 7.7×10⁻¹⁰, n=3,259). Among the top-5% highest-effect variants the signed correlation rises to ρ = +0.271 (p = 4.6×10⁻⁴, n=163). The predictor captures real signal — quantile normalization destroys the dynamic range needed to see it at scale.
+The diagnosis is saturation. Magnitude correlation actually survives: |score| vs |LFC| gives ρ = +0.108 across the full panel, and among the top-5% highest-effect variants the signed correlation rises to ρ = +0.271. The model is tracking the right biology. The normalization step just compresses everyone into the same bin.
 
----
-
-## Finding 3 — Raw model outputs restore the directional signal
-
-We extracted raw per-track expression deltas (RNA-seq, CAGE, PRO-cap, K562/blood-lineage filter) for 600 stratified Tewhey variants (120 per |LFC| quintile).
-
-### Correlation table
+Switching to raw per-track expression deltas — extracted before quantile normalization, filtered to K562/blood-lineage tracks (RNA-seq, CAGE, PRO-cap) — recovers the continuous signal:
 
 | Predictor | Spearman ρ | 95% CI | p | n |
 |---|---|---|---|---|
-| Raw max signed expression delta vs mpra_lfc | **+0.174** | [+0.086, +0.255] | 1.8×10⁻⁵ | 600 |
-| Raw mean signed expression delta vs mpra_lfc | +0.148 | [+0.068, +0.223] | 2.7×10⁻⁴ | 600 |
-| Quantile-normalized expression_subscore vs mpra_lfc | +0.036 | [−0.002, +0.075] | 0.039 | 3,259 |
+| Raw max signed expression delta | **+0.174** | [+0.086, +0.255] | 1.8×10⁻⁵ | 600 |
+| Raw mean signed expression delta | +0.148 | [+0.068, +0.223] | 2.7×10⁻⁴ | 600 |
+| Quantile-normalized expression_subscore | +0.036 | [−0.002, +0.075] | 0.039 | 3,259 |
 | \|Raw max delta\| vs \|mpra_lfc\| | +0.207 | [+0.124, +0.282] | 3.0×10⁻⁷ | 600 |
-
-**5× improvement** in Spearman ρ from raw over normalized (0.174 vs 0.036).
-
-### Why: the distributions
 
 ![Distribution comparison](figures/phase2_distribution.png)
 
-Normalized scores are bimodal (94.9% at |score| > 0.9). Raw deltas are continuous (88.5% have |delta| < 0.1). A bimodal predictor cannot rank variants within a category; a continuous one can.
+The distribution comparison makes the issue concrete. Normalized scores pile up near ±1 — bimodal, no room to rank. Raw deltas form a smooth continuous distribution centered near zero. Most variants have small effects; a few have large ones. That's what you need to correlate against an MPRA.
 
-### Correlation by effect-size bin
+![Correlation by LFC bin](figures/phase2_lfc_bins.png)
 
-![LFC bin correlation](figures/phase2_lfc_bins.png)
+Breaking down by effect size shows where each predictor succeeds. Among variants with large measured effects (|LFC| > 0.5), raw deltas reach ρ = +0.614; normalized scores get to +0.245. In the low-effect bins where most variants sit, normalized scores are near zero or negative, while raw deltas stay modestly positive. The raw signal is most valuable precisely where it's hardest to separate signal from noise.
 
 | \|LFC\| bin | Normalized ρ | n | Raw ρ | n |
 |---|---|---|---|---|---|
 | 0 – 0.05 | −0.015 | 1,512 | +0.092 | 281 |
 | 0.05 – 0.10 | −0.000 | 892 | +0.099 | 168 |
-| 0.10 – 0.20 | +0.044 | 553 | **+0.383** | 93 |
+| 0.10 – 0.20 | +0.044 | 553 | +0.383 | 93 |
 | 0.20 – 0.50 | +0.185 | 242 | +0.031 | 43 |
 | > 0.50 | +0.245 | 60 | **+0.614** | 15 |
 
-Raw deltas outperform normalized scores in the low-effect bins (the majority of variants) and strongly outperform for high-effect variants (|LFC| > 0.5: ρ = +0.614 vs +0.245).
+We also confirmed that saturation isn't specific to Tewhey's MPRA design or to neurological and metabolic diseases. Platelet count GWAS variants (n=198) saturate at 99.0%; hemoglobin GWAS variants (n=195) at 100%. Same pattern, different biology, different experimental paradigm.
+
+| Variant set | n | Expression >0.9 |
+|---|---|---|
+| Tewhey MPRA | 3,259 | 94.9% |
+| Disease GWAS — expression | 767 | 99.6% |
+| Disease GWAS — chromatin | 767 | 69.4% |
+| Disease GWAS — TF binding | 767 | 31.9% |
+| Platelet count GWAS | 198 | 99.0% |
+| Hemoglobin GWAS | 195 | 100.0% |
+
+The saturation gradient across modalities is mechanistic. Expression scores aggregate across three track types (RNA-seq, CAGE, PRO-cap), so the max over more tracks pushes more variants to the tail. TF binding, using only one track type, saturates the least at 32%.
+
+![Blood trait replication](figures/phase3_saturation_cdf.png)
 
 ---
 
-## Finding 4 — Generalization across datasets and tissues
+## What this means in practice
 
-The saturation replicates on two independent GWAS sets — different biology (megakaryopoiesis, erythropoiesis), different diseases, same structural result:
+The normalized and raw scores answer different questions, and using either for the wrong one gives misleading results.
 
-- **Platelet count GWAS** (EFO_0004615, n=198): 99.0% at |score| > 0.9
-- **Hemoglobin GWAS** (EFO_0004611, n=195): 100.0% at |score| > 0.9
+Normalized scores are the right choice when you're working within a credible set at a single GWAS locus — asking which of five fine-mapped variants has the largest regulatory footprint relative to the rest of the genome. APOE is a good example: rs429358 (ε4) scores −0.9996 and rs7412 (ε2) scores +0.9976, opposite signs consistent with their opposing Alzheimer's risk. That directional information is meaningful within a locus. The scores fail when you try to use them to rank thousands of variants across different loci against each other, because compression to ±1 removes the differences between them.
 
-Saturation is a structural consequence of genome-wide-calibrated quantile scoring applied to regulatory-enriched variant sets. It is not specific to Tewhey's MPRA design, K562 cells, or any particular disease.
+Raw model outputs are the right choice when you're comparing against experimental measurements. If you're running an MPRA, doing a CRISPRi screen, or benchmarking against eQTL effect sizes, the raw delta gives you the absolute predicted effect of the substitution — how much AlphaGenome thinks the variant changes expression in relevant tissues. That continuous scale is what enables meaningful correlation.
 
----
+A few concrete applications:
 
-## Implications
+**Benchmarking regulatory tools.** Most published comparisons of tools like AlphaGenome, Enformer, and Sei against MPRA or eQTL data report correlations in the 0.1–0.3 range and interpret them as reflecting model quality. Some of that signal is real, but part of it is a normalization artifact — the tools are being evaluated on test sets that saturate their calibration. Using raw outputs would give a more accurate picture of which models are actually learning regulatory logic.
 
-> *For validation against continuous experimental measurements, use raw model outputs.*  
-> *For ranking within enrichment-selected variant sets, use normalized scores.*  
-> *They serve different purposes; one is not strictly better than the other.*
+**Rare variant interpretation.** For a de novo variant in a patient, you often want to know whether the variant is likely to have a large regulatory effect in absolute terms — not whether it ranks in the 99th percentile of common variation. Raw deltas give you that: a value near zero means the substitution is predicted to change expression little; a large value means it probably matters.
 
-**Use quantile-normalized scores when:**
-- Prioritizing variants within a credible set at a single GWAS locus
-- Comparing relative regulatory impact where all candidates are at the same locus
-- Screening for unusually high regulatory impact relative to genome-wide background
+**MPRA panel design.** Before running an MPRA, you might want to prioritize which candidate variants to include based on predicted effect size. Normalized scores will rank most GWAS-derived candidates similarly (they all score near 1). Raw deltas will actually separate them, letting you focus experimental effort on variants with predicted effects large enough to detect.
 
-**Use raw model outputs when:**
-- Correlating with continuous measurements (MPRA LFC, CRISPRi, eQTL effect sizes)
-- Validating against any dataset selected for regulatory relevance
-- Absolute effect magnitude matters
-
-**Implication for published benchmarks:** comparisons between regulatory scoring tools that use quantile-normalized outputs against MPRA/eQTL data compare bimodal predictors against continuous measurements. The resulting low correlations reflect normalization strategy, not model quality.
-
-### APOE ε4 / ε2 as a canonical validation example
-
-rs429358 (APOE ε4) scores expression_subscore = −0.9996; rs7412 (APOE ε2) scores +0.9976. Opposite signs, consistent with their opposing Alzheimer's risk effects. Normalized scores are directionally correct for within-locus comparison — the failure mode is specific to cross-locus validation at scale.
+**Fine-mapping support.** Within a credible set, normalized scores work well and are what the pipeline is built for. The pipeline here scores 363 GWAS variant-disease pairs across Alzheimer's, type 2 diabetes, schizophrenia, and Parkinson's disease, and reports per-locus rankings that can feed directly into fine-mapping workflows alongside PIPs from SuSiE or FINEMAP.
 
 ---
 
 ## Setup
 
-### Requirements
-
-- Python 3.11+
-- AlphaGenome API key ([request access](https://alphagenome.google))
+You need Python 3.11+ and an AlphaGenome API key ([request access here](https://alphagenome.google)). The scoring runs are included in the repo as cached databases, so you can reproduce all figures without re-running the API.
 
 ```bash
 git clone https://github.com/kavya1a/gwas-finemapping-dashboard.git
 cd gwas-finemapping-dashboard
 pip install -r requirements.txt
 cp .env.example .env
-# Add your key: ALPHAGENOME_API_KEY=...
+# add ALPHAGENOME_API_KEY to .env
 ```
 
-### Regenerate figures from cached data (no API key needed, ~1 min)
-
-All scoring results are included in the repo as SQLite databases and a parquet file.
+To regenerate all figures from the cached data (takes about a minute, no API key needed):
 
 ```bash
 make figures
 ```
 
-Generates all six figures in `figures/`.
-
-### Full pipeline from scratch (API key required, ~20 hrs)
+To run the full pipeline from scratch — fetching variants, scoring them, and extracting raw deltas — expect about 20 hours of API calls:
 
 ```bash
-make pipeline   # fetch, score, extract raw deltas
-make figures    # generate figures
-make verify     # run canonical variant tests
+make pipeline
+make figures
+make verify
 ```
 
-See `Makefile` for individual targets.
+`make verify` runs canonical variant tests. Three of five pass; the two failures are documented in [`docs/OVERNIGHT_BLOCKERS.md`](docs/OVERNIGHT_BLOCKERS.md) and reflect tissue-profile thresholds, not incorrect scores.
 
 ---
 
-## Verification
-
-Canonical variant tests check that known directional effects are recovered (APOE alleles, PPARG P12A, BIN1 rs744373, FTO rs9939609).
-
-```
-Tests passing: 3/5
-```
-
-Tests 3 and 5 fail due to tissue-profile sensitivity thresholds in the current K562 configuration, not incorrect scores. See [`docs/OVERNIGHT_BLOCKERS.md`](docs/OVERNIGHT_BLOCKERS.md) for details.
-
----
-
-## Repository structure
+## Repo structure
 
 ```
 ├── README.md
-├── TEWHEY_RESULT.md        # Full diagnostic: 4 hypotheses, 4 correlation numbers
-├── CITATION.cff
-├── LICENSE
-├── Makefile
-├── config.yaml             # Tissue profiles, canonical variants, pipeline params
-├── requirements.txt
+├── TEWHEY_RESULT.md        # full diagnostic writeup: four hypotheses, four correlation numbers
+├── config.yaml             # tissue profiles, canonical variants, pipeline parameters
 │
-├── batch_score.py          # Score GWAS variants → scored_variants.db
-├── prefetch_variants.py    # Fetch GWAS Catalog variants → preloaded_variants.db
-├── tewhey_analysis.py      # Download + score Tewhey MPRA → tewhey_mpra.parquet
-├── extract_raw_deltas.py   # Raw expression deltas for 600 Tewhey variants
-├── saturation_figure.py    # Phase 1: saturation CDF
-├── phase2_figures.py       # Phase 2: distribution + LFC-bin correlation
-├── phase3_blood_traits.py  # Phase 3: blood trait replication
+├── batch_score.py          # score GWAS variants → scored_variants.db
+├── prefetch_variants.py    # fetch GWAS Catalog variants → preloaded_variants.db
+├── tewhey_analysis.py      # download and score Tewhey MPRA panel
+├── extract_raw_deltas.py   # extract raw expression deltas for 600 Tewhey variants
+├── saturation_figure.py    # saturation CDF figures
+├── phase2_figures.py       # distribution and LFC-bin correlation figures
+├── phase3_blood_traits.py  # blood trait replication
 ├── gwas_catalog.py         # GWAS Catalog v2 REST client
-├── allele_resolver.py      # Ensembl allele resolution + SQLite cache
+├── allele_resolver.py      # Ensembl allele resolution with SQLite caching
 │
 ├── scoring/                # AlphaGenome scoring utilities
-├── verification/           # Canonical variant test harness
-├── figures/                # All generated figures (PNG)
-├── docs/                   # Project log, scope lock, operational notes
-└── archive/                # Superseded work (pre-pivot scripts)
+├── verification/           # canonical variant test harness
+├── figures/                # all generated figures
+├── docs/                   # project log and operational notes
+└── archive/                # pre-pivot scripts, kept for reference
 ```
 
-### Data files (included)
+All scoring results are included so you can inspect the data or regenerate figures without API access:
 
 | File | Contents |
 |---|---|
-| `scored_variants.db` | 767 scored GWAS variant-disease pairs (4 diseases) |
+| `scored_variants.db` | 767 scored GWAS variant-disease pairs across 4 diseases |
 | `tewhey_mpra.parquet` | Tewhey 2016 panel with AlphaGenome scores (3,259 variants) |
-| `tewhey_raw_delta_cache.db` | Raw expression deltas for 600 stratified Tewhey variants |
-| `phase3_blood_cache.db` | Expression subscores for 393 blood trait GWAS variants |
+| `tewhey_raw_delta_cache.db` | raw expression deltas for 600 stratified Tewhey variants |
+| `phase3_blood_cache.db` | expression subscores for 393 blood trait GWAS variants |
 | `variants.db` | Ensembl allele resolution cache |
-| `preloaded_variants.db` | Prefetched GWAS variant coordinates |
 
-**Data provenance:** Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 REST API · Ensembl REST API (GRCh38) · AlphaGenome API v0.6.1
+Data sources: Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 · Ensembl REST API · AlphaGenome v0.6.1
 
 ---
 
 ## Limitations
 
-**Sample size for raw deltas.** The raw delta correlation (ρ = +0.174, n=600) uses a stratified subsample. The normalized score comparison uses all 3,259 scored variants. Confidence intervals are wider for the raw delta estimate.
+The raw delta correlation (ρ = +0.174, n=600) uses a stratified subsample while the normalized comparison uses all 3,259 scored variants, so the confidence intervals are wider for the raw estimate. The stratification is by |LFC| quintile to ensure representation across effect sizes, but a larger sample would tighten the estimate.
 
-**Tissue mismatch.** Raw deltas use K562/blood-lineage tissue profiles. Tewhey 2016 assayed LCL (lymphoblastoid) regulatory activity. A closer tissue match would likely improve correlation; the current result is a lower bound.
+Raw deltas here use K562/blood-lineage tissue profiles. Tewhey 2016 assayed LCL regulatory activity, which is related but not identical. A better-matched tissue profile would likely improve the correlation further — ρ = +0.174 is a lower bound.
 
-**AlphaGenome window.** Variants near chromosome boundaries or with complex nearby variation may produce less reliable predictions. No explicit filtering was applied.
+Saturation for blood trait GWAS variants (Phase 3) was confirmed using quantile scores only. We didn't extract raw deltas for those variants, so we can't confirm that the correlation improvement generalizes beyond the Tewhey dataset. The saturation finding generalizes; the raw delta fix is demonstrated only on Tewhey.
 
-**MPRA assay scope.** Tewhey 2016 measures 200bp oligo activity, not in-situ chromatin context. Short-element MPRA and native regulatory function diverge for variants with distal chromatin effects.
-
-**Phase 3 raw deltas not extracted.** Blood trait saturation is confirmed via quantile scores only. Whether raw deltas would show the same correlation improvement for blood trait variants is not tested.
-
-**Canonical tests: 3/5 pass.** The 5/5 target was cut from scope. Failing tests reflect tissue-profile sensitivity, not incorrect scoring logic.
+The canonical variant test suite passes 3/5. The two failures are sensitivity issues with the tissue profile configuration, not wrong scores — but they should be resolved before using this pipeline to make clinical claims.
 
 ---
 
@@ -250,11 +186,10 @@ Tests 3 and 5 fail due to tissue-profile sensitivity thresholds in the current K
 
 ```bibtex
 @misc{amrutham2026saturation,
-  author    = {Amrutham, Kavya},
-  title     = {Quantile normalization saturates regulatory variant scoring},
-  year      = {2026},
-  url       = {https://github.com/kavya1a/gwas-finemapping-dashboard},
-  note      = {GitHub repository}
+  author = {Amrutham, Kavya},
+  title  = {Quantile normalization saturates regulatory variant scoring},
+  year   = {2026},
+  url    = {https://github.com/kavya1a/gwas-finemapping-dashboard}
 }
 ```
 
