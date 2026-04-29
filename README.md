@@ -3,10 +3,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 
-**Kavya Amrutham** · Barnard College, Columbia University · ka3041@barnard.edu
-
-*Independent undergraduate research project. Not peer reviewed. Code, data, and methodology open for inspection.*
-
 ---
 
 This repository documents a methodological investigation into how quantile normalization affects validation of regulatory variant prediction tools, using AlphaGenome as the test case.
