@@ -7,7 +7,7 @@ authors:
     affiliation: "Barnard College, Columbia University"
     email: "ka3041@barnard.edu"
 date-released: 2026-04-27
-url: "https://github.com/kavya1a/gwas-finemapping-dashboard"
+url: "https://github.com/kavya1a/regulatory-score-saturation"
 abstract: >
   Quantile-normalized AlphaGenome scores collapse to a near-binary signal on
   regulatory-enriched variant sets. We demonstrate this saturation on Tewhey 2016

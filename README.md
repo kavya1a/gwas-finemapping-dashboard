@@ -5,17 +5,21 @@
 
 **Kavya Amrutham** · Barnard College, Columbia University · ka3041@barnard.edu
 
+*Independent undergraduate research project. Not peer reviewed. Code, data, and methodology open for inspection.*
+
 ---
+
+This repository documents a methodological investigation into how quantile normalization affects validation of regulatory variant prediction tools, using AlphaGenome as the test case.
 
 Tools like AlphaGenome rank variants by their predicted regulatory impact relative to millions of common variants in the genome. That ranking is useful — but it has a blind spot. When you apply it to a set of variants already selected for regulatory relevance (GWAS hits, MPRA panels, eQTL credible sets), nearly all of them land at the extreme end of the scale. The predictor goes effectively binary. Correlation with experimental measurements drops to near zero — not because the model is wrong, but because the normalization step erases the differences between variants that the experiment is designed to detect.
 
-Switching to raw model outputs (un-normalized deltas) brings Spearman correlation with MPRA measurements from ρ = 0.036 to ρ = 0.174 — a fivefold improvement, with no changes to the underlying model.
+Switching to raw model outputs (un-normalized deltas) recovers a directional signal that quantile normalization discards: Spearman correlation with MPRA measurements rises from ρ = 0.036 to ρ = 0.174, with no changes to the underlying model.
 
 ---
 
-![Saturation CDF across three modalities](figures/saturation_cdf.png)
+![Saturation CDF with random variant negative control](figures/saturation_cdf.png)
 
-*Empirical CDF of |expression subscore| for three variant sets. A random draw of common variants would follow the diagonal by construction. 94.9% of Tewhey MPRA variants and 99.6% of disease GWAS variants score above 0.9 — the predictor has nowhere left to go.*
+*Empirical CDF of |expression subscore| for four variant sets. The green curve is the negative control: 1,000 common variants sampled from random genomic regions with no regulatory pre-selection. It tracks the diagonal closely, confirming that the predictor does not saturate on unselected variation. The blue and red curves — Tewhey MPRA regulatory loci and disease GWAS variants — pile up near 1. Saturation is a property of how these sets were selected, not of the predictor itself.*
 
 ---
 
@@ -103,8 +107,8 @@ There's also a design implication for anyone planning an MPRA. If you select can
 You need Python 3.11+ and an AlphaGenome API key ([request access here](https://alphagenome.google)). The scoring runs are included in the repo as cached databases, so you can reproduce all figures without re-running the API.
 
 ```bash
-git clone https://github.com/kavya1a/gwas-finemapping-dashboard.git
-cd gwas-finemapping-dashboard
+git clone https://github.com/kavya1a/regulatory-score-saturation.git
+cd regulatory-score-saturation
 pip install -r requirements.txt
 cp .env.example .env
 # add ALPHAGENOME_API_KEY to .env
@@ -124,7 +128,7 @@ make figures
 make verify
 ```
 
-`make verify` runs canonical variant tests. Three of five pass; the two failures are documented in [`docs/OVERNIGHT_BLOCKERS.md`](docs/OVERNIGHT_BLOCKERS.md) and reflect tissue-profile thresholds, not incorrect scores.
+`make verify` runs canonical variant tests. Three of five pass. The two failures are documented in [`docs/OVERNIGHT_BLOCKERS.md`](docs/OVERNIGHT_BLOCKERS.md).
 
 ---
 
@@ -168,13 +172,19 @@ Data sources: Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 ·
 
 ## Limitations
 
-The raw delta correlation (ρ = +0.174, n=600) uses a stratified subsample while the normalized comparison uses all 3,259 scored variants, so the confidence intervals are wider for the raw estimate. The stratification is by |LFC| quintile to ensure representation across effect sizes, but a larger sample would tighten the estimate.
+**Sample size.** The raw delta correlation (ρ = +0.174, n=600) uses a stratified subsample; the normalized comparison uses all 3,259 scored variants. Confidence intervals are wider for the raw estimate. Stratification by |LFC| quintile ensures representation across effect sizes, but the estimate would tighten with a larger sample.
 
-Raw deltas here use K562/blood-lineage tissue profiles. Tewhey 2016 assayed LCL regulatory activity, which is related but not identical. A better-matched tissue profile would likely improve the correlation further — ρ = +0.174 is a lower bound.
+**Tissue mismatch.** Raw deltas use K562/blood-lineage tissue profiles. Tewhey 2016 measured regulatory activity in LCLs (lymphoblastoid cell lines), which have different chromatin accessibility and transcription factor occupancy. This mismatch suppresses correlation — ρ = +0.174 is a lower bound on what a correctly matched tissue profile would give.
 
-Saturation for blood trait GWAS variants (Phase 3) was confirmed using quantile scores only. We didn't extract raw deltas for those variants, so we can't confirm that the correlation improvement generalizes beyond the Tewhey dataset. The saturation finding generalizes; the raw delta fix is demonstrated only on Tewhey.
+**Single model, single normalization scheme.** This analysis tests one tool (AlphaGenome v0.6.1) with one normalization approach. The saturation pattern likely applies to other quantile-normalized regulatory predictors, but we don't test that claim here.
 
-The canonical variant test suite passes 3/5. The two failures are sensitivity issues with the tissue profile configuration, not wrong scores — but they should be resolved before using this pipeline to make clinical claims.
+**Raw output access required.** Recovering the directional signal requires access to per-track model outputs before normalization. Some tool deployments only expose the normalized score. This limits applicability in contexts where API access is restricted to the published scoring pipeline.
+
+**Quantile normalization is a design choice, not a flaw.** The normalization makes AlphaGenome scores interpretable as genome-wide percentiles and is appropriate for within-locus variant prioritization. The issue documented here is about using those scores for a purpose they weren't designed for — cross-locus validation against continuous measurements.
+
+**Blood trait replication is partial.** Saturation on platelet count and hemoglobin GWAS variants is confirmed using quantile scores. Whether raw deltas on those variants also improve correlation is not tested.
+
+**Canonical tests: 3/5 pass.** The two failures are documented in [`docs/OVERNIGHT_BLOCKERS.md`](docs/OVERNIGHT_BLOCKERS.md).
 
 ---
 
@@ -185,7 +195,7 @@ The canonical variant test suite passes 3/5. The two failures are sensitivity is
   author = {Amrutham, Kavya},
   title  = {Quantile normalization saturates regulatory variant scoring},
   year   = {2026},
-  url    = {https://github.com/kavya1a/gwas-finemapping-dashboard}
+  url    = {https://github.com/kavya1a/regulatory-score-saturation}
 }
 ```
 
