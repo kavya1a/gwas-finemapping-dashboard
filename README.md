@@ -17,9 +17,9 @@ Switching to raw model outputs (un-normalized deltas) recovers a directional sig
 
 ---
 
-![Saturation CDF with random variant negative control](figures/saturation_cdf.png)
+![Saturation CDF](figures/saturation_cdf.png)
 
-*Empirical CDF of |expression subscore| for four variant sets. The green curve is the negative control: 1,000 common variants sampled from random genomic regions with no regulatory pre-selection. It tracks the diagonal closely, confirming that the predictor does not saturate on unselected variation. The blue and red curves — Tewhey MPRA regulatory loci and disease GWAS variants — pile up near 1. Saturation is a property of how these sets were selected, not of the predictor itself.*
+*Empirical CDF of |expression subscore| for two regulatory-enriched variant sets, plotted against the theoretical uniform distribution (grey dashed) that AlphaGenome's quantile calibration is designed to produce for random common variation. Both empirical curves pile up near 1 while the diagonal stays linear. Tewhey MPRA loci (blue, 94.9% above 0.9) and disease GWAS variants (red, 99.6% above 0.9) are entirely compressed into the same extreme bin, leaving no room to rank them against each other.*
 
 ---
 
@@ -27,7 +27,7 @@ Switching to raw model outputs (un-normalized deltas) recovers a directional sig
 
 AlphaGenome's published scoring pipeline converts raw per-track effect sizes into genome-wide percentiles, calibrated against ~300,000 common variants from gnomAD and 1000 Genomes. The result is a score in [−1, +1] where 0.9 means "this variant has a larger predicted regulatory effect than 90% of common genetic variation." For prioritizing candidates at a GWAS locus — asking which variant in a credible set has the largest regulatory footprint — this is exactly the right tool.
 
-The problem arises at validation time. MPRA panels and eQTL datasets are not random. They are assembled from variants that already showed up in GWAS, passed regulatory annotation filters, or were selected specifically because they might be functional. By the same logic that makes them interesting to study, they are enriched for regulatory activity relative to background. The calibration treats them all as extreme, because they are. 94.9% of Tewhey MPRA variants score above 0.9 in absolute value. 99.6% of GWAS disease variants do. When everything scores near ±1, the predictor cannot distinguish a variant that modestly nudges transcription from one that dramatically shuts it down.
+The problem arises at validation time, through two compounding mechanisms. First, MPRA panels and eQTL datasets are not random: they are assembled from variants that already showed up in GWAS, passed regulatory annotation filters, or were selected specifically because they might be functional. By the same logic that makes them interesting to study, they are enriched for regulatory activity relative to background. Second, the expression_subscore is computed as the maximum signed percentile across the selected tissue tracks (RNA-seq, CAGE, PRO-cap in K562). Taking the max over many tracks inflates saturation even for non-regulatory variants — with 20–30 K562 tracks, the probability that the max percentile exceeds 0.9 approaches 90–95% for any variant. The two effects compound: selection bias pushes most variants toward extreme scores, and the max aggregation fills in the rest. The result: 94.9% of Tewhey MPRA variants score above 0.9 in absolute value. 99.6% of GWAS disease variants do. When everything scores near ±1, the predictor cannot distinguish a variant that modestly nudges transcription from one that dramatically shuts it down.
 
 This is not a bug in AlphaGenome, and it probably affects any tool that uses genome-wide quantile normalization — Enformer, Sei, and others that score in similar frameworks would face the same issue applied to the same kinds of test sets.
 
@@ -183,6 +183,8 @@ Data sources: Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 ·
 **Quantile normalization is a design choice, not a flaw.** The normalization makes AlphaGenome scores interpretable as genome-wide percentiles and is appropriate for within-locus variant prioritization. The issue documented here is about using those scores for a purpose they weren't designed for — cross-locus validation against continuous measurements.
 
 **Blood trait replication is partial.** Saturation on platelet count and hemoglobin GWAS variants is confirmed using quantile scores. Whether raw deltas on those variants also improve correlation is not tested.
+
+**Max-over-tracks aggregation inflates saturation.** The expression_subscore is the maximum signed percentile across the selected K562 expression tracks (RNA-seq, CAGE, PRO-cap). For a variant set of n tracks, the max of n independent uniform random variables has P(max > 0.9) = 1 − 0.9^n. With 20–30 K562 tracks, this approaches 90–95% for any variant, regardless of regulatory function. We attempted a random-variant negative control using 1,000 common variants from gene-poor regions; they also saturated at ~97%, confirming that the aggregation step contributes to saturation alongside the regulatory enrichment of the primary datasets. The core finding — that raw deltas better predict MPRA correlation — is unaffected by this confound, since raw deltas avoid the quantile aggregation entirely.
 
 **Canonical tests: 3/5 pass.** The two failures are documented in [`docs/OVERNIGHT_BLOCKERS.md`](docs/OVERNIGHT_BLOCKERS.md).
 

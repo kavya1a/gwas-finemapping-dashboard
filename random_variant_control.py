@@ -41,30 +41,40 @@ CONFIG_PATH = DIR / "config.yaml"
 VARIANT_TIMEOUT_SECS = 60
 TARGET_N = 1000
 MAF_THRESHOLD = 0.01
-BATCH_SIZE = 20       # small batches keep per-request time under 5s
 SEED = 123
 
 VALID_BASES = re.compile(r"^[ACGTNacgtn]+$")
 
-# Five regions spread across the genome, away from well-known GWAS loci.
-# 100kb windows; each yields ~4000+ biallelic SNVs, ~85% common.
-# 50kb windows (Ensembl overlap limit); 10 regions for chromosomal diversity
+# True gene desert regions: large intergenic stretches with minimal annotated
+# genes or regulatory elements in any tissue. chr8:2.7M-7M is the canonical
+# example in the literature. These are K562-transcriptionally-quiet by design.
 SAMPLE_REGIONS = [
-    ("1",  45_000_000,  45_050_000),
-    ("2",  88_000_000,  88_050_000),
-    ("5", 100_000_000, 100_050_000),
-    ("7",  90_000_000,  90_050_000),
-    ("10", 80_000_000,  80_050_000),
-    ("12", 70_000_000,  70_050_000),
-    ("15", 60_000_000,  60_050_000),
-    ("17", 35_000_000,  35_050_000),
-    ("19", 20_000_000,  20_050_000),
-    ("20", 30_000_000,  30_050_000),
+    ("8",   3_000_000,   3_050_000),   # chr8 large gene desert (2.7-7M)
+    ("8",   5_000_000,   5_050_000),
+    ("13", 25_000_000,  25_050_000),   # chr13 gene-poor region
+    ("13", 27_000_000,  27_050_000),
+    ("4",  80_000_000,  80_050_000),   # chr4 intergenic stretch
+    ("4",  82_000_000,  82_050_000),
+    ("14", 60_000_000,  60_050_000),   # chr14 gene-poor intergenic
+    ("18", 22_000_000,  22_050_000),
+    ("3", 197_000_000, 197_050_000),   # chr3 distal intergenic
+    ("11", 130_000_000, 130_050_000),  # chr11 gene desert
 ]
 VARIANTS_PER_REGION = TARGET_N // len(SAMPLE_REGIONS)  # 100 each
 
-ENSEMBL_OVERLAP = "https://rest.ensembl.org/overlap/region/human/{chrom}:{start}-{end}"
-ENSEMBL_POST    = "https://rest.ensembl.org/variation/human?pops=1"
+GNOMAD_API = "https://gnomad.broadinstitute.org/api"
+
+_GNOMAD_QUERY = """
+query RegionVariants($chrom: String!, $start: Int!, $stop: Int!) {
+  region(chrom: $chrom, start: $start, stop: $stop, reference_genome: GRCh38) {
+    variants(dataset: gnomad_r3) {
+      variant_id
+      rsid
+      genome { af }
+    }
+  }
+}
+"""
 
 # ---------------------------------------------------------------------------
 # Cache
@@ -114,100 +124,61 @@ def _save(rsid: str, v: dict, score: float | None, error: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Variant fetching + MAF resolution
+# Variant fetching via gnomAD GraphQL (single call per region, AF included)
 # ---------------------------------------------------------------------------
-
-def _fetch_region_rsids(chrom: str, start: int, end: int) -> list[str]:
-    """Return rsIDs of biallelic SNVs in the region."""
-    url = ENSEMBL_OVERLAP.format(chrom=chrom, start=start, end=end)
-    resp = requests.get(url, params={"feature": "variation"},
-                        headers={"Content-Type": "application/json",
-                                 "Accept": "application/json"}, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    rsids = [
-        v["id"] for v in data
-        if str(v.get("id", "")).startswith("rs")
-        and len(v.get("alleles", [])) == 2
-        and all(len(a) == 1 for a in v.get("alleles", []))
-    ]
-    return rsids
-
-
-def _resolve_batch(rsids: list[str]) -> list[dict]:
-    """Resolve a small batch with MAF; returns list of variant dicts."""
-    resp = requests.post(
-        ENSEMBL_POST,
-        json={"ids": rsids},
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    variants = []
-    for rsid in rsids:
-        info = data.get(rsid)
-        if not info:
-            continue
-
-        # Get GRCh38 mapping
-        mappings = info.get("mappings", [])
-        grch38 = [m for m in mappings if m.get("assembly_name") == "GRCh38"]
-        mapping = grch38[0] if grch38 else (mappings[0] if mappings else None)
-        if not mapping:
-            continue
-
-        chrom_raw = str(mapping.get("seq_region_name", ""))
-        chrom = chrom_raw if chrom_raw.startswith("chr") else f"chr{chrom_raw}"
-        pos = mapping.get("start")
-        allele_str = mapping.get("allele_string", "")
-        if not allele_str or "/" not in allele_str:
-            continue
-        parts = allele_str.split("/")
-        ref = parts[0]
-        alts = [a for a in parts[1:] if a and a != ref and len(a) == 1]
-        if not alts or len(ref) != 1:
-            continue
-        if not re.match(r"^[ACGTacgt]$", ref) or not re.match(r"^[ACGTacgt]$", alts[0]):
-            continue
-
-        # MAF from populations
-        pops = info.get("populations", [])
-        maf = max((p.get("frequency", 0.0) for p in pops if p.get("allele") != ref),
-                  default=0.0)
-        if maf < MAF_THRESHOLD:
-            continue
-
-        alt = alts[0]
-        variants.append({"rsid": rsid, "chrom": chrom, "pos": int(pos),
-                         "ref": ref, "alt": alt, "maf": maf})
-    return variants
-
 
 def _sample_region(chrom: str, start: int, end: int,
                    n_target: int) -> list[dict]:
-    """Fetch and resolve up to n_target common SNVs from one region."""
+    """Fetch common biallelic SNVs from gnomAD for the given region."""
     print(f"  Fetching {chrom}:{start:,}-{end:,}...")
-    rsids = _fetch_region_rsids(chrom, start, end)
-    rng = np.random.default_rng(SEED)
-    rng.shuffle(rsids)  # type: ignore[arg-type]
+    for attempt in range(3):
+        resp = requests.post(
+            GNOMAD_API,
+            json={"query": _GNOMAD_QUERY,
+                  "variables": {"chrom": chrom, "start": start, "stop": end}},
+            headers={"Content-Type": "application/json"},
+            timeout=60,
+        )
+        if resp.status_code == 429:
+            print(f"    rate limited, retrying in 30s (attempt {attempt+1}/3)")
+            time.sleep(30)
+            continue
+        resp.raise_for_status()
+        break
+    payload = resp.json()
+    raw = payload.get("data", {}).get("region", {}).get("variants", [])
 
     variants: list[dict] = []
-    for i in range(0, len(rsids), BATCH_SIZE):
+    rng = np.random.default_rng(SEED)
+    indices = list(range(len(raw)))
+    rng.shuffle(indices)  # type: ignore[arg-type]
+
+    for i in indices:
         if len(variants) >= n_target:
             break
-        batch = rsids[i:i + BATCH_SIZE]
-        try:
-            time.sleep(1.0 / 15)
-            resolved = _resolve_batch(batch)
-            variants.extend(resolved)
-        except Exception as e:
-            print(f"    batch error: {e}")
+        v = raw[i]
+        af = (v.get("genome") or {}).get("af") or 0.0
+        if af < MAF_THRESHOLD:
+            continue
+        vid = v.get("variant_id", "")  # "8-3000143-A-C"
+        parts = vid.split("-")
+        if len(parts) != 4:
+            continue
+        _, pos_str, ref, alt = parts
+        if not re.match(r"^[ACGTacgt]$", ref) or not re.match(r"^[ACGTacgt]$", alt):
+            continue
+        rsid = v.get("rsid") or vid
+        variants.append({
+            "rsid": rsid,
+            "chrom": f"chr{chrom}",
+            "pos": int(pos_str),
+            "ref": ref,
+            "alt": alt,
+            "maf": float(af),
+        })
 
-    result = variants[:n_target]
-    print(f"  {chrom}: {len(result)} common SNVs resolved")
-    return result
+    print(f"  {chrom}: {len(variants)} common SNVs resolved")
+    return variants
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +383,9 @@ def main() -> None:
     # Step 1: Collect common variants from random regions
     print("Sampling variants from random genomic regions...")
     all_variants: list[dict] = []
-    for chrom, start, end in SAMPLE_REGIONS:
+    for i, (chrom, start, end) in enumerate(SAMPLE_REGIONS):
+        if i > 0:
+            time.sleep(5)  # stay under gnomAD rate limit
         region_variants = _sample_region(chrom, start, end, VARIANTS_PER_REGION)
         all_variants.extend(region_variants)
     print(f"\nTotal collected: {len(all_variants)} common SNVs\n")
