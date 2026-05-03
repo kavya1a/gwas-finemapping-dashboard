@@ -38,7 +38,7 @@ FIG_DIR.mkdir(exist_ok=True)
 CACHE_DB = DIR / "random_variant_cache.db"
 CONFIG_PATH = DIR / "config.yaml"
 
-VARIANT_TIMEOUT_SECS = 60
+VARIANT_TIMEOUT_SECS = 15
 TARGET_N = 1000
 MAF_THRESHOLD = 0.01
 SEED = 123
