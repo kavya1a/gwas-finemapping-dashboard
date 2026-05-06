@@ -9,7 +9,7 @@ This repository documents a methodological investigation into how quantile norma
 
 Tools like AlphaGenome rank variants by their predicted regulatory impact relative to millions of common variants in the genome. That ranking is useful — but it has a blind spot. When you apply it to a set of variants already selected for regulatory relevance (GWAS hits, MPRA panels, eQTL credible sets), nearly all of them land at the extreme end of the scale. The predictor goes effectively binary. Correlation with experimental measurements drops to near zero — not because the model is wrong, but because the normalization step erases the differences between variants that the experiment is designed to detect.
 
-Switching to raw model outputs (un-normalized deltas) recovers a directional signal that quantile normalization discards: Spearman correlation with MPRA measurements rises from ρ = 0.036 to ρ = 0.174, with no changes to the underlying model.
+Switching to raw model outputs (un-normalized deltas) recovers a directional signal that quantile normalization discards: Spearman correlation with MPRA measurements rises from ρ = 0.036 to ρ = 0.123 (full Tewhey panel, n = 3,275, p = 1.5×10⁻¹²), with no changes to the underlying model.
 
 ---
 
@@ -44,10 +44,12 @@ Switching to raw per-track expression deltas — extracted before quantile norma
 
 | Predictor | Spearman ρ | 95% CI | p | n |
 |---|---|---|---|---|
-| Raw max signed expression delta | **+0.174** | [+0.086, +0.255] | 1.8×10⁻⁵ | 600 |
-| Raw mean signed expression delta | +0.148 | [+0.068, +0.223] | 2.7×10⁻⁴ | 600 |
+| Raw max signed expression delta | **+0.123** | [+0.088, +0.157] | 1.5×10⁻¹² | 3,275 |
+| Raw mean signed expression delta | +0.118 | [+0.083, +0.152] | 1.5×10⁻¹¹ | 3,275 |
 | Quantile-normalized expression_subscore | +0.036 | [−0.002, +0.075] | 0.039 | 3,259 |
-| \|Raw max delta\| vs \|mpra_lfc\| | +0.207 | [+0.124, +0.282] | 3.0×10⁻⁷ | 600 |
+| \|Raw max delta\| vs \|mpra_lfc\| | +0.106 | [+0.072, +0.137] | 1.2×10⁻⁹ | 3,275 |
+
+> **Preliminary subsample:** An earlier stratified sample of 600 variants (120 per |LFC| quintile) gave ρ = +0.174 [+0.086, +0.255]. That estimate was inflated by oversampling the high-|LFC| tail, where raw deltas correlate best. The full-panel numbers above are the honest comparison.
 
 ![Distribution comparison](figures/phase2_distribution.png)
 
@@ -138,7 +140,7 @@ make verify
 ├── batch_score.py          # score GWAS variants → scored_variants.db
 ├── prefetch_variants.py    # fetch GWAS Catalog variants → preloaded_variants.db
 ├── tewhey_analysis.py      # download and score Tewhey MPRA panel
-├── extract_raw_deltas.py   # extract raw expression deltas for 600 Tewhey variants
+├── extract_raw_deltas.py   # extract raw expression deltas; --full for full panel, --limit N for smoke tests
 ├── saturation_figure.py    # saturation CDF figures
 ├── phase2_figures.py       # distribution and LFC-bin correlation figures
 ├── phase3_blood_traits.py  # blood trait replication
@@ -158,7 +160,7 @@ All scoring results are included so you can inspect the data or regenerate figur
 |---|---|
 | `scored_variants.db` | 767 scored GWAS variant-disease pairs across 4 diseases |
 | `tewhey_mpra.parquet` | Tewhey 2016 panel with AlphaGenome scores (3,259 variants) |
-| `tewhey_raw_delta_cache.db` | raw expression deltas for 600 stratified Tewhey variants |
+| `tewhey_raw_delta_cache.db` | raw expression deltas for 3,301 full Tewhey panel (3,275 usable) |
 | `phase3_blood_cache.db` | expression subscores for 393 blood trait GWAS variants |
 | `variants.db` | Ensembl allele resolution cache |
 
@@ -168,9 +170,11 @@ Data sources: Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 ·
 
 ## Limitations
 
-**Sample size.** The raw delta correlation (ρ = +0.174, n=600) uses a stratified subsample; the normalized comparison uses all 3,259 scored variants. Confidence intervals are wider for the raw estimate. Stratification by |LFC| quintile ensures representation across effect sizes, but the estimate would tighten with a larger sample.
+**Sample size.** The full-panel raw delta correlation (ρ = +0.123, n=3,275) covers 99.2% of the 3,301 Tewhey variants scored; 26 variants failed due to unsupported sequence lengths (n=12), API timeouts (n=10), or transient network errors (n=4). Failures are uniformly distributed across |LFC| quintiles — no enrichment at high-effect variants.
 
-**Tissue mismatch.** Raw deltas use K562/blood-lineage tissue profiles. Tewhey 2016 measured regulatory activity in LCLs (lymphoblastoid cell lines), which have different chromatin accessibility and transcription factor occupancy. This mismatch suppresses correlation — ρ = +0.174 is a lower bound on what a correctly matched tissue profile would give.
+**Single-tissue track aggregation.** Raw deltas are aggregated by taking the max signed value across all K562/blood-lineage expression tracks (RNA-seq, CAGE, PRO-cap). This picks whichever single track moves most, discarding co-regulation structure across the remaining tracks. A variant that drives strong signal in one track scores identically to one with concordant moderate effects across many tracks. The reported ρ = +0.123 is a lower bound on what a track-aware aggregation (e.g., weighted mean, PCA first component) could achieve with the same underlying model outputs.
+
+**Tissue mismatch.** Raw deltas use K562/blood-lineage tissue profiles. Tewhey 2016 measured regulatory activity in LCLs (lymphoblastoid cell lines), which have different chromatin accessibility and transcription factor occupancy. This mismatch suppresses correlation — ρ = +0.123 is a lower bound on what a correctly matched tissue profile would give.
 
 **Single model, single normalization scheme.** This analysis tests one tool (AlphaGenome v0.6.1) with one normalization approach. The saturation pattern likely applies to other quantile-normalized regulatory predictors, but we don't test that claim here.
 

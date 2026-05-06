@@ -20,6 +20,7 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import io
 import os
@@ -43,12 +44,14 @@ DIR = Path(__file__).parent
 PARQUET     = DIR / "tewhey_mpra.parquet"
 CACHE_DB    = DIR / "tewhey_raw_delta_cache.db"
 OUT_FIG     = DIR / "tewhey_raw_delta_results.png"
+OUT_FIG_FULL = DIR / "figures" / "tewhey_raw_delta_full_results.png"
 OUT_REPORT  = DIR / "TEWHEY_RESULT.md"
 CONFIG_PATH = DIR / "config.yaml"
 
 VARIANT_TIMEOUT_SECS = 60
 N_BOOTSTRAP = 1000
 SEED = 42
+MIN_CORRELATION_N = 10
 
 EXPRESSION_OUTPUT_TYPES = {"RNA_SEQ", "CAGE", "PROCAP"}
 
@@ -120,6 +123,10 @@ def _save_raw_delta(rsid: str, entry: dict) -> None:
 # ---------------------------------------------------------------------------
 # Stratified sample
 # ---------------------------------------------------------------------------
+
+def _select_full_panel(df: pd.DataFrame) -> pd.DataFrame:
+    return df.dropna(subset=["rsid", "chrom", "pos", "ref", "alt"]).copy()
+
 
 def _build_sample(df: pd.DataFrame, n_per_quintile: int = 120) -> pd.DataFrame:
     scored = df[df["full_composite"].notna()].copy()
@@ -212,7 +219,7 @@ def _correlate(label: str, x: pd.Series, y: pd.Series) -> dict:
     mask = xn.notna() & yn.notna() & np.isfinite(xn) & np.isfinite(yn)
     xv, yv = xn[mask].to_numpy(float), yn[mask].to_numpy(float)
     n = len(xv)
-    if n < 10:
+    if n < MIN_CORRELATION_N:
         return {"label": label, "r": None, "p": None, "ci": (None, None), "n": n}
     r, p = st.spearmanr(xv, yv)
     ci = _bootstrap_ci(xv, yv)
@@ -224,7 +231,7 @@ def _correlate(label: str, x: pd.Series, y: pd.Series) -> dict:
 # Scatter plot
 # ---------------------------------------------------------------------------
 
-def _make_scatter(stats: dict, out_path: Path) -> None:
+def _make_scatter(stats: dict, out_path: Path, mode: str = "stratified") -> None:
     xv, yv = stats["xv"], stats["yv"]
     r, p, n = stats["r"], stats["p"], stats["n"]
     ci_lo, ci_hi = stats["ci"]
@@ -258,8 +265,10 @@ def _make_scatter(stats: dict, out_path: Path) -> None:
 
     ax.set_xlabel("MPRA allelic LFC (B − A, Tewhey 2016)", fontsize=11)
     ax.set_ylabel("AlphaGenome max signed raw expression delta", fontsize=11)
-    ax.set_title("Raw expression delta vs MPRA LFC\n"
-                 "(stratified sample, 120/quintile, K562/blood tissue filter)", fontsize=10)
+    subtitle = ("stratified sample, 120/quintile" if mode == "stratified"
+                else "full Tewhey panel, 3,259 variants")
+    ax.set_title(f"Raw expression delta vs MPRA LFC\n({subtitle}, K562/blood tissue filter)",
+                 fontsize=10)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
@@ -271,7 +280,7 @@ def _make_scatter(stats: dict, out_path: Path) -> None:
 # Report
 # ---------------------------------------------------------------------------
 
-def _write_report(corrs: dict, sample_n: int) -> None:
+def _write_report(corrs: dict, sample_n: int, mode: str = "stratified") -> None:
     lines = [
         "# Tewhey MPRA validation — AlphaGenome raw expression delta",
         "",
@@ -310,7 +319,9 @@ def _write_report(corrs: dict, sample_n: int) -> None:
         "",
         "## Raw delta validation",
         "",
-        f"A stratified sample of {sample_n} variants (120 per |LFC| quintile) was rescored via",
+        (f"A stratified sample of {sample_n} variants (120 per |LFC| quintile) was rescored via"
+         if mode == "stratified" else
+         f"All {sample_n} variants from the full Tewhey 2016 MPRA panel were scored via"),
         "AlphaGenome. Raw per-track model outputs (`raw_score`) were extracted before quantile",
         "normalization and aggregated across K562/blood-lineage expression tracks (RNA_SEQ, CAGE, PRO-cap).",
         "",
@@ -362,18 +373,35 @@ def _write_report(corrs: dict, sample_n: int) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--full", action="store_true",
+                        help="Score all Tewhey variants (not just stratified 600)")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Cap API calls to N uncached variants (smoke-test mode)")
+    args = parser.parse_args()
+
     api_key = os.environ.get("ALPHAGENOME_API_KEY", "")
     if not api_key:
         print("ERROR: ALPHAGENOME_API_KEY not set")
         sys.exit(1)
 
     df = pd.read_parquet(PARQUET)
-    sample = _build_sample(df)
-    print(f"Stratified sample: {len(sample)} variants across 5 |LFC| quintiles")
+    if args.full:
+        sample = _select_full_panel(df)
+        out_fig = OUT_FIG_FULL
+        mode = "full"
+        print(f"Full panel: {len(sample)} variants")
+    else:
+        sample = _build_sample(df)
+        out_fig = OUT_FIG
+        mode = "stratified"
+        print(f"Stratified sample: {len(sample)} variants across 5 |LFC| quintiles")
 
     _init_cache()
     cache = _load_cache()
     to_score = [row for _, row in sample.iterrows() if row.rsid not in cache]
+    if args.limit is not None:
+        to_score = to_score[:args.limit]
     print(f"  {len(cache)} cached, {len(to_score)} to score (~{len(to_score)*2//60} min at 2s/variant)")
 
     if to_score:
@@ -470,7 +498,7 @@ def main() -> None:
 
     # ── Scatter ─────────────────────────────────────────────────────────────
     best = c_max if (c_max.get("r") or 0) >= (c_mean.get("r") or 0) else c_mean
-    _make_scatter(best, OUT_FIG)
+    _make_scatter(best, out_fig, mode=mode)
 
     # ── Report ───────────────────────────────────────────────────────────────
     corrs = {
@@ -479,7 +507,7 @@ def main() -> None:
         "quant_signed":    c_quant,
         "mag_abs":         c_mag,
     }
-    _write_report(corrs, n_scored)
+    _write_report(corrs, n_scored, mode=mode)
 
     print("\nAll done.")
 

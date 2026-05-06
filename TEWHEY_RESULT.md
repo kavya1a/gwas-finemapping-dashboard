@@ -1,6 +1,6 @@
 # Tewhey MPRA validation — AlphaGenome raw expression delta
 
-_Generated: 2026-04-22 19:23:44_
+_Generated: 2026-05-05 18:42:46_
 
 ## Diagnostic summary
 
@@ -33,7 +33,7 @@ enriched sets; MPRA LFC is dominated by near-zero values (73% of variants have |
 
 ## Raw delta validation
 
-A stratified sample of 600 variants (120 per |LFC| quintile) was rescored via
+All 3275 variants from the full Tewhey 2016 MPRA panel were scored via
 AlphaGenome. Raw per-track model outputs (`raw_score`) were extracted before quantile
 normalization and aggregated across K562/blood-lineage expression tracks (RNA_SEQ, CAGE, PRO-cap).
 
@@ -41,16 +41,16 @@ normalization and aggregated across K562/blood-lineage expression tracks (RNA_SE
 
 | Metric | Spearman ρ | 95% CI | p | n |
 |---|---|---|---|---|
-| raw max signed expression delta vs mpra_lfc (a) | +0.1739 | [+0.086, +0.255] | 1.848e-05 | 600 |
-| raw mean signed expression delta vs mpra_lfc (b) | +0.1481 | [+0.068, +0.223] | 2.727e-04 | 600 |
+| raw max signed expression delta vs mpra_lfc (a) | +0.1232 | [+0.088, +0.157] | 1.470e-12 | 3275 |
+| raw mean signed expression delta vs mpra_lfc (b) | +0.1176 | [+0.083, +0.152] | 1.456e-11 | 3275 |
 | quantile-normalized expression_subscore vs mpra_lfc (c) | +0.0361 | [-0.002, +0.075] | 3.939e-02 | 3259 |
-| |raw max expression delta| vs |mpra_lfc| (d) | +0.2074 | [+0.124, +0.282] | 2.963e-07 | 600 |
+| |raw max expression delta| vs |mpra_lfc| (d) | +0.1060 | [+0.072, +0.137] | 1.187e-09 | 3275 |
 
 **Primary claim:** raw max signed expression delta vs mpra_lfc.
 
 ### Scatter plot
 
-![Raw delta vs MPRA LFC](figures/tewhey_raw_delta_results.png)
+![Raw delta vs MPRA LFC](tewhey_raw_delta_results.png)
 
 ---
 
