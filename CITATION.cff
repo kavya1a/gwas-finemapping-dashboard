@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this code or findings, please cite as below."
-title: "Quantile normalization saturates regulatory variant scoring"
+title: "Score saturation in deep learning regulatory variant prediction"
 authors:
   - family-names: "Amrutham"
     given-names: "Kavya"

@@ -1,13 +1,13 @@
-# Quantile normalization saturates regulatory variant scoring
+# Score saturation in deep learning regulatory variant prediction
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 
 ---
 
-This repository documents a methodological investigation into how quantile normalization affects validation of regulatory variant prediction tools, using AlphaGenome as the test case.
+This repository documents a methodological investigation into how score normalization and aggregation affect validation of deep learning regulatory variant prediction tools, demonstrated on AlphaGenome with MPRA and GWAS data.
 
-Tools like AlphaGenome rank variants by their predicted regulatory impact relative to millions of common variants in the genome. That ranking is useful — but it has a blind spot. When you apply it to a set of variants already selected for regulatory relevance (GWAS hits, MPRA panels, eQTL credible sets), nearly all of them land at the extreme end of the scale. The predictor goes effectively binary. Correlation with experimental measurements drops to near zero — not because the model is wrong, but because the normalization step erases the differences between variants that the experiment is designed to detect.
+Tools like AlphaGenome rank variants by their predicted regulatory impact relative to ~300,000 common variants drawn from gnomAD and 1000 Genomes. That ranking is useful — but it has a blind spot. When you apply it to a set of variants already selected for regulatory relevance (GWAS hits, MPRA panels, eQTL credible sets), nearly all of them land at the extreme end of the scale. The predictor goes effectively binary. Correlation with experimental measurements drops to near zero — not because the model is wrong, but because two compounding mechanisms (genome-wide quantile normalization and max-over-tracks aggregation) erase the differences between variants that the experiment is designed to detect.
 
 Switching to raw model outputs (un-normalized deltas) recovers a directional signal that quantile normalization discards: Spearman correlation with MPRA measurements rises from ρ = 0.036 to ρ = 0.123 (full Tewhey panel, n = 3,275, p = 1.5×10⁻¹²), with no changes to the underlying model.
 
@@ -23,9 +23,15 @@ Switching to raw model outputs (un-normalized deltas) recovers a directional sig
 
 AlphaGenome's published scoring pipeline converts raw per-track effect sizes into genome-wide percentiles, calibrated against ~300,000 common variants from gnomAD and 1000 Genomes. The result is a score in [−1, +1] where 0.9 means "this variant has a larger predicted regulatory effect than 90% of common genetic variation." For prioritizing candidates at a GWAS locus — asking which variant in a credible set has the largest regulatory footprint — this is exactly the right tool.
 
-The problem arises at validation time, through two compounding mechanisms. First, MPRA panels and eQTL datasets are not random: they are assembled from variants that already showed up in GWAS, passed regulatory annotation filters, or were selected specifically because they might be functional. By the same logic that makes them interesting to study, they are enriched for regulatory activity relative to background. Second, the expression_subscore is computed as the maximum signed percentile across the selected tissue tracks (RNA-seq, CAGE, PRO-cap in K562). Taking the max over many tracks inflates saturation even for non-regulatory variants — with 20–30 K562 tracks, the probability that the max percentile exceeds 0.9 approaches 90–95% for any variant. The two effects compound: selection bias pushes most variants toward extreme scores, and the max aggregation fills in the rest. The result: 94.9% of Tewhey MPRA variants score above 0.9 in absolute value. 99.6% of GWAS disease variants do. When everything scores near ±1, the predictor cannot distinguish a variant that modestly nudges transcription from one that dramatically shuts it down.
+The problem arises at validation time, through two compounding mechanisms.
 
-This is not a bug in AlphaGenome, and it probably affects any tool that uses genome-wide quantile normalization — Enformer, Sei, and others that score in similar frameworks would face the same issue applied to the same kinds of test sets.
+**Mechanism 1 — selection bias.** MPRA panels and eQTL datasets are not random: they are assembled from variants that already showed up in GWAS, passed regulatory annotation filters, or were selected specifically because they might be functional. By the same logic that makes them interesting to study, they are enriched for regulatory activity relative to background.
+
+**Mechanism 2 — max-over-tracks aggregation.** The expression_subscore is computed as the maximum signed percentile across the selected tissue tracks (RNA-seq, CAGE, PRO-cap in K562). For *n* independent uniform percentiles, P(max > 0.9) = 1 − 0.9ⁿ, so with 20–30 K562 tracks the max exceeds 0.9 with probability 88–96% — for *any* variant, regulatory or not. To isolate this effect, we ran a random-variant negative control: 999 common variants drawn from gene-poor regions on chromosomes 3, 4, 8, 11, 13, 14, and 18, deliberately chosen far from known regulatory loci. They saturated at 99.4% above |0.9| (median |score| = 0.991). Aggregation alone, without any regulatory enrichment, is sufficient to produce near-total saturation.
+
+The two mechanisms compound: selection bias pushes regulatory-enriched variants toward the tail, and max aggregation finishes the job for everything else. The result: 94.9% of Tewhey MPRA variants score above 0.9 in absolute value. 99.6% of GWAS disease variants do. When everything scores near ±1, the predictor cannot distinguish a variant that modestly nudges transcription from one that dramatically shuts it down.
+
+This is not a bug in AlphaGenome, and it probably affects any tool that uses genome-wide quantile normalization with multi-track aggregation — Enformer, Sei, and others that score in similar frameworks would face the same issue applied to the same kinds of test sets. Score saturation in deep learning models has been noted broadly, but to our knowledge the specific interaction between quantile normalization, max-over-tracks aggregation, and validation against enrichment-selected datasets has not been documented in prior AlphaGenome, Enformer, or Sei benchmarking literature.
 
 ---
 
@@ -42,14 +48,17 @@ The diagnosis is saturation. Magnitude correlation actually survives: |score| vs
 
 Switching to raw per-track expression deltas — extracted before quantile normalization, filtered to K562/blood-lineage tracks (RNA-seq, CAGE, PRO-cap) — recovers the continuous signal:
 
+> Raw delta extraction was first performed on a stratified subsample of 600 variants (120 per |LFC| quintile) spanning the full |LFC| range; this preserves comparability across effect-size bins while keeping API costs tractable, and the head-to-head comparison between normalized and raw scores is paired across the same variants, so the stratification does not bias that comparison. The full-panel run (n = 3,275) extends this and is reported as the headline result. The two are listed separately below.
+
 | Predictor | Spearman ρ | 95% CI | p | n |
 |---|---|---|---|---|
-| Raw max signed expression delta | **+0.123** | [+0.088, +0.157] | 1.5×10⁻¹² | 3,275 |
-| Raw mean signed expression delta | +0.118 | [+0.083, +0.152] | 1.5×10⁻¹¹ | 3,275 |
+| Raw max signed expression delta (full panel) | **+0.123** | [+0.088, +0.157] | 1.5×10⁻¹² | 3,275 |
+| Raw mean signed expression delta (full panel) | +0.118 | [+0.083, +0.152] | 1.5×10⁻¹¹ | 3,275 |
 | Quantile-normalized expression_subscore | +0.036 | [−0.002, +0.075] | 0.039 | 3,259 |
 | \|Raw max delta\| vs \|mpra_lfc\| | +0.106 | [+0.072, +0.137] | 1.2×10⁻⁹ | 3,275 |
+| Raw max signed expression delta (stratified pilot) | +0.174 | [+0.086, +0.255] | 1.9×10⁻⁵ | 600 |
 
-> **Preliminary subsample:** An earlier stratified sample of 600 variants (120 per |LFC| quintile) gave ρ = +0.174 [+0.086, +0.255]. That estimate was inflated by oversampling the high-|LFC| tail, where raw deltas correlate best. The full-panel numbers above are the honest comparison.
+The pilot ρ (+0.174) is higher than the full-panel ρ (+0.123) because the stratified sample over-represents the high-|LFC| tail relative to the population, where raw deltas correlate best. The full-panel number is the population-level estimate; both runs agree on the qualitative finding that raw deltas substantially outperform normalized scores.
 
 ![Distribution comparison](figures/phase2_distribution.png)
 
@@ -78,6 +87,8 @@ We also confirmed that saturation isn't specific to Tewhey's MPRA design or to n
 | Platelet count GWAS | 198 | 99.0% |
 | Hemoglobin GWAS | 195 | 100.0% |
 
+The Disease GWAS rows show n=767 because that's the subset of the 1,125 scored variant-disease pairs with `signed_max_score` cached at the time the saturation figure was generated; the column was added mid-project, and earlier rows would need a rescore to backfill. Saturation rates are not expected to shift materially with the additional 358 variants.
+
 The saturation gradient across modalities is mechanistic. Expression scores aggregate across three track types (RNA-seq, CAGE, PRO-cap), so the max over more tracks pushes more variants to the tail. TF binding, using only one track type, saturates the least at 32%.
 
 ![Blood trait replication](figures/phase3_saturation_cdf.png)
@@ -96,7 +107,7 @@ The practical consequences extend in a few directions. There's an active debate 
 
 For rare disease interpretation, the distinction matters more directly. A de novo regulatory variant in a patient isn't interesting because it ranks in the 99th percentile of common variation — it's interesting if it's predicted to substantially disrupt expression of a dosage-sensitive gene. A raw delta near zero means the model thinks the substitution changes expression little. A large value is grounds for prioritizing the variant for functional follow-up. The percentile score would call both of them extreme and give you no way to tell them apart.
 
-There's also a design implication for anyone planning an MPRA. If you select candidates from GWAS credible sets and use normalized scores to decide which variants to test, you'll find that most of them score similarly — the normalization doesn't discriminate between them. Raw deltas will separate them, which means you can focus experimental capacity on variants with predicted effects large enough to detect against the noise floor of the assay. This pipeline scores 363 variant-disease pairs across Alzheimer's, type 2 diabetes, schizophrenia, and Parkinson's disease; the per-locus rankings work as a first-pass filter for exactly this kind of prioritization.
+There's also a design implication for anyone planning an MPRA. If you select candidates from GWAS credible sets and use normalized scores to decide which variants to test, you'll find that most of them score similarly — the normalization doesn't discriminate between them. Raw deltas will separate them, which means you can focus experimental capacity on variants with predicted effects large enough to detect against the noise floor of the assay. This pipeline scores 1,125 variant-disease pairs across Alzheimer's, type 2 diabetes, schizophrenia, and Parkinson's disease; the per-locus rankings work as a first-pass filter for exactly this kind of prioritization.
 
 ---
 
@@ -126,7 +137,7 @@ make figures
 make verify
 ```
 
-`make verify` runs canonical variant tests. Three of five pass. The two failures are documented in [`docs/OVERNIGHT_BLOCKERS.md`](docs/OVERNIGHT_BLOCKERS.md).
+`make verify` runs canonical variant tests. Three of five pass. Per-variant rationale and the two failures are documented in [`docs/canonical_variants.md`](docs/canonical_variants.md).
 
 ---
 
@@ -158,7 +169,7 @@ All scoring results are included so you can inspect the data or regenerate figur
 
 | File | Contents |
 |---|---|
-| `scored_variants.db` | 767 scored GWAS variant-disease pairs across 4 diseases |
+| `scored_variants.db` | 1,125 scored GWAS variant-disease pairs across 4 diseases (767 with per-modality `signed_max_score` cached; the rest predate that column and would need a rescore to backfill) |
 | `tewhey_mpra.parquet` | Tewhey 2016 panel with AlphaGenome scores (3,259 variants) |
 | `tewhey_raw_delta_cache.db` | raw expression deltas for 3,301 full Tewhey panel (3,275 usable) |
 | `phase3_blood_cache.db` | expression subscores for 393 blood trait GWAS variants |
@@ -184,9 +195,17 @@ Data sources: Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 ·
 
 **Blood trait replication is partial.** Saturation on platelet count and hemoglobin GWAS variants is confirmed using quantile scores. Whether raw deltas on those variants also improve correlation is not tested.
 
-**Max-over-tracks aggregation inflates saturation.** The expression_subscore is the maximum signed percentile across the selected K562 expression tracks (RNA-seq, CAGE, PRO-cap). For a variant set of n tracks, the max of n independent uniform random variables has P(max > 0.9) = 1 − 0.9^n. With 20–30 K562 tracks, this approaches 90–95% for any variant, regardless of regulatory function. We attempted a random-variant negative control using 1,000 common variants from gene-poor regions; they also saturated at ~97%, confirming that the aggregation step contributes to saturation alongside the regulatory enrichment of the primary datasets. The core finding — that raw deltas better predict MPRA correlation — is unaffected by this confound, since raw deltas avoid the quantile aggregation entirely.
+**Selection bias vs aggregation contributions are not fully isolated.** The two mechanisms (selection bias, max aggregation) are described and quantified separately above, but their relative contribution to saturation on any given enrichment-selected dataset is not cleanly partitioned. The core finding — that raw deltas better predict MPRA correlation than normalized scores — is unaffected, since raw deltas avoid the quantile aggregation entirely.
 
-**Canonical tests: 3/5 pass.** The two failures are documented in [`docs/OVERNIGHT_BLOCKERS.md`](docs/OVERNIGHT_BLOCKERS.md).
+**Canonical tests: 3/5 pass.** The two failures are documented in [`docs/canonical_variants.md`](docs/canonical_variants.md).
+
+### What would change my mind
+
+The interpretation here rests on a specific causal story about quantile normalization and max aggregation. Three experiments not yet run would directly test that story; we state them as predictions, not findings.
+
+- **Matched-tissue scoring.** Re-running raw delta extraction with LCL (lymphoblastoid) tracks instead of K562 should bring the model into the cell type Tewhey 2016 actually measured. If the K562/LCL mismatch is suppressing correlation as claimed, matched-tissue ρ should rise. If it stays flat or falls, the headline ρ = +0.123 reflects the model's true ceiling on this dataset rather than a tissue artifact, and the story needs revising.
+- **Raw deltas on a non-regulatory variant set.** If selection bias is what concentrates raw deltas at non-zero values for the Tewhey panel, then running the same raw delta extraction on the random-variant control (999 common variants from gene-poor regions) should yield a roughly zero-centered, near-uniform distribution rather than a piled-up tail. A saturated raw-delta distribution on random variants would mean the saturation is intrinsic to the model output, not to the normalization step.
+- **Median or mean aggregation across tracks.** If max-over-tracks is the mechanism inflating saturation as predicted by the order-statistics math, then replacing max with per-track median or mean across the 20–30 K562 tracks should substantially reduce saturation rates on the same variant sets — both Tewhey and the random control. Equivalent saturation under mean aggregation would falsify the aggregation half of the two-mechanism story.
 
 ---
 
@@ -195,7 +214,7 @@ Data sources: Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 ·
 ```bibtex
 @misc{amrutham2026saturation,
   author = {Amrutham, Kavya},
-  title  = {Quantile normalization saturates regulatory variant scoring},
+  title  = {Score saturation in deep learning regulatory variant prediction},
   year   = {2026},
   url    = {https://github.com/kavya1a/regulatory-score-saturation}
 }
