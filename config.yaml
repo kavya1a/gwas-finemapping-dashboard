@@ -194,6 +194,27 @@ tewhey:
   max_cadd_fail_pct: 10      # non-halting flag threshold
 
 # ---------------------------------------------------------------------------
+# Matched-statistic calibration (Components 2 + 3)
+# ---------------------------------------------------------------------------
+# Reproducible from seed alone: window placement, gnomAD GraphQL fetch,
+# MAF filter, Tewhey overlap exclusion, and the deterministic 6,000-variant
+# pool subset are all RNG-driven by `seed`.
+matched_calibration:
+  seed: 2026
+  n_windows: 66                  # 50 kb each, allocated proportional to chrom length
+  window_bp: 50000
+  min_telomere_bp: 1000000       # min distance from chrom ends
+  autosomes_only: true
+  maf_threshold: 0.01            # gnomAD v3 AF cutoff (same source AlphaGenome calibrates against)
+  pool_cap: 6000                 # deterministic subset of pool sent to scoring
+  parallel_workers: 4            # ThreadPool over variants
+  variant_timeout_secs: 60       # per-variant inner timeout (mirrors batch_score.py)
+  saturation_halt_after: 200     # diagnostic stop check (early variants)
+  saturation_halt_fraction: 0.30 # halt if |raw_max| > 0.9 exceeds this on common variants
+  null_size_target: 5000
+  null_size_actual: 5941         # 5,995 attempted, 0 errors, 52 timeouts → 5,941 clean rows
+
+# ---------------------------------------------------------------------------
 # CADD
 # ---------------------------------------------------------------------------
 cadd:
