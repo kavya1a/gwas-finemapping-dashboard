@@ -5,7 +5,7 @@
 
 ---
 
-AlphaGenome's published quantile-calibrated scoring uses single-track summary statistics. When max-over-tracks aggregation is applied to these outputs — a common composition for tissue-level variant scoring — saturation collapses signed correlation against measured MPRA log fold change from ρ = 0.123 to ρ = 0.037 (n = 3,246), with 94.9% of regulatory variants pinned at |score| > 0.9. Re-deriving the quantile calibration using matched max-over-tracks statistics on a common-variant null recovers the full underlying signal at ρ = 0.123 (95% CI [0.088, 0.157], p = 2.5×10⁻¹²). The saturation is an artifact of the calibration-statistic mismatch, not of the model. The fix is methodological: match calibration summary statistics to the use case.
+AlphaGenome's published quantile-calibrated scoring uses single-track summary statistics. When max-over-tracks aggregation is applied to these outputs — a common composition for tissue-level variant scoring — saturation collapses signed correlation against measured MPRA log fold change from ρ = 0.123 to ρ = 0.037 (n = 3,246), with 94.9% of regulatory variants pinned at |score| > 0.9. Re-deriving the quantile calibration using matched max-over-tracks statistics on a common-variant null recovers the full underlying signal at ρ = 0.123 (95% CI [0.088, 0.157], p = 2.5×10⁻¹²) (same n; the matched-calibration result is a re-quantiling of the same variants against a matched null). The saturation is an artifact of the calibration-statistic mismatch, not of the model. The fix is methodological: match calibration summary statistics to the use case.
 
 ---
 
@@ -84,7 +84,9 @@ Breaking down by effect size shows where each predictor succeeds. Among variants
 | 0.20 – 0.50 | +0.185 | 242 | +0.031 | 43 |
 | > 0.50 | +0.245 | 60 | **+0.614** | 15 |
 
-Saturation is not specific to Tewhey's MPRA design or to neurological/metabolic disease GWAS. Platelet count GWAS variants (n = 198) saturate at 99.0%; hemoglobin GWAS variants (n = 195) at 100%. Different biology, different paradigm, same calibration-statistic mismatch driving the saturation:
+The non-monotone pattern in the raw/matched column at the 0.20–0.50 bin reflects small-sample noise (n = 43); bins below 0.10 and the > 0.50 bin are the more stable estimates.
+
+Saturation is not specific to Tewhey's MPRA design or to neurological/metabolic disease GWAS. Platelet count GWAS variants (n = 198) saturate at 99.0%; hemoglobin GWAS variants (n = 195) at 100%. Different biology, different paradigm, consistent with the calibration-statistic mismatch documented above:
 
 | Variant set | n | Original-quantile expression \|score\| > 0.9 |
 |---|---|---|
@@ -139,7 +141,7 @@ For **correlation with an experimental measurement** — an MPRA, a CRISPRi scre
 - **Matched quantiles** are on a calibrated [−1, +1] scale comparable across variants and studies, with a defined null (the common-variant background under the matched summary statistic).
 - **Raw deltas** carry the original effect-size units of the underlying tracks but are not directly comparable across studies without their own null.
 
-The practical consequences extend in a few directions. There is an active debate in the field about how well deep learning regulatory models actually generalize — papers benchmarking AlphaGenome, Enformer, Sei, and others against MPRA or eQTL data consistently report correlations in the 0.1–0.3 range, and the field treats these as a ceiling on what the models can do. If those benchmarks are using a published quantile that was calibrated under a different summary statistic than the one applied at evaluation time, the ceiling is partially artificial.
+The practical consequences extend in a few directions. There is an active debate in the field about how well deep learning regulatory models actually generalize — papers benchmarking AlphaGenome, Enformer, Sei, and others against MPRA or eQTL data consistently report correlations in the 0.1–0.3 range, and the field treats these as a ceiling on what the models can do. Whether other benchmarks face a similar calibration-statistic artifact depends on whether the aggregation applied at evaluation differs from the summary statistic the published calibration was built on; that is a hypothesis suggested by the AlphaGenome result above, not a claim about specific tools.
 
 For rare disease interpretation, the distinction matters more directly. A de novo regulatory variant in a patient is not interesting because it ranks in the 99th percentile of common variation under a saturated single-track-calibrated max — it is interesting if it is predicted to substantially disrupt expression of a dosage-sensitive gene. Matched-calibration scores or raw deltas separate variants by predicted effect size; the saturated original quantile would call most candidates extreme and give no way to tell them apart.
 
