@@ -15,6 +15,7 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import os
 import re
@@ -414,7 +415,41 @@ def make_phase3_cdf(blood_scores: dict[str, np.ndarray]) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def _from_cache_only() -> None:
+    """Regenerate the Phase 3 figure from the existing cache. No API calls."""
+    print("=== Phase 3: figure regeneration from cache ===\n")
+    blood_scores: dict[str, np.ndarray] = {}
+    for trait in BLOOD_TRAITS:
+        cached = _load_cache(trait)
+        arr = np.array(
+            [v["expression_subscore"] for v in cached.values()
+             if v.get("expression_subscore") is not None],
+            dtype=float,
+        )
+        blood_scores[trait] = arr
+        if len(arr) > 0:
+            pct_sat = (np.abs(arr) > 0.9).mean()
+            print(f"  {trait}: n={len(arr)}, |score|>0.9: {pct_sat:.1%}, "
+                  f"median|score|={np.median(np.abs(arr)):.4f}")
+        else:
+            print(f"  {trait}: no cached scores found")
+    make_phase3_cdf(blood_scores)
+    print("\nPhase 3 figure regenerated from cache.")
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help="Regenerate the Phase 3 figure from phase3_blood_cache.db without any API calls.",
+    )
+    args = parser.parse_args()
+
+    if args.from_cache:
+        _from_cache_only()
+        return
+
     _init_cache()
 
     print("=== Phase 3: Blood trait GWAS variant scoring ===\n")

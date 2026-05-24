@@ -33,7 +33,7 @@ figures/phase2_distribution.png figures/phase2_lfc_bins.png: tewhey_mpra.parquet
 phase3: figures/phase3_saturation_cdf.png
 
 figures/phase3_saturation_cdf.png: phase3_blood_cache.db scored_variants.db tewhey_mpra.parquet
-	$(PYTHON) phase3_blood_traits.py
+	$(PYTHON) phase3_blood_traits.py --from-cache
 
 figures: phase1 phase2 phase3
 	@echo "All figures generated."
