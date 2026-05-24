@@ -212,7 +212,7 @@ matched_calibration:
   saturation_halt_after: 200     # diagnostic stop check (early variants)
   saturation_halt_fraction: 0.30 # halt if |raw_max| > 0.9 exceeds this on common variants
   null_size_target: 5000
-  null_size_actual: 5941         # 5,995 attempted, 0 errors, 52 timeouts → 5,941 clean rows
+  null_size_actual: 5933         # 5,995 attempted, 60 errors, 2 timeouts → 5,933 clean rows (after re-score for mean/median, 2026-05-21)
 
 # ---------------------------------------------------------------------------
 # CADD
