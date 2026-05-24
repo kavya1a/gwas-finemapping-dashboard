@@ -244,7 +244,6 @@ make verify
 
 ```
 ├── README.md
-├── TEWHEY_RESULT.md             # raw-delta diagnostic writeup (pre-matched-calibration)
 ├── config.yaml                  # tissue profiles, canonical variants, matched_calibration block
 │
 ├── batch_score.py               # score GWAS variants → scored_variants.db
