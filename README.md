@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
+[![reproduce-figures](https://github.com/kavya1a/regulatory-score-saturation/actions/workflows/ci.yml/badge.svg)](https://github.com/kavya1a/regulatory-score-saturation/actions/workflows/ci.yml)
 
 ![Hero recovery](figures/hero_recovery.png)
 
@@ -17,6 +18,12 @@
 The fix is methodological: match calibration summary statistics to the use case, and the choice of aggregation downstream becomes a presentation decision rather than a science one.
 
 ## Reproduce in 5 minutes
+
+[![Open the reproduction notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kavya1a/regulatory-score-saturation/blob/main/notebooks/reproduce.ipynb)
+
+The fastest path is the Colab notebook (`notebooks/reproduce.ipynb`) — it reproduces the headline ρ recovery and the three-recipe finding in ~15 seconds from cached data, no setup required.
+
+Locally:
 
 ```bash
 git clone https://github.com/kavya1a/regulatory-score-saturation.git
@@ -59,14 +66,7 @@ This is not a bug in AlphaGenome. The published calibration is faithful to its c
 
 ## Findings
 
-3,301 variants from the Tewhey 2016 MPRA panel (GSE75661) — a set of regulatory loci drawn from GWAS studies — were scored. Successful raw deltas were obtained for 3,275; the four-way comparison below is on the 3,246 variants that have valid values for all four predictors. Before concluding the model failed, four alternative explanations for the original near-zero ρ = +0.036 were ruled out:
-
-- Allele orientation mismatch (ref/alt flipped vs. MPRA A/B convention) — 100% match via Ensembl
-- Wrong LFC column — `mpra_lfc = B − A` matches Tewhey 2016 directly
-- Score saturation — confirmed, 94.9% of original-quantile scores are above |0.9|
-- Coordinate drift hg19 → hg38 — 5/5 spot-checked positions exact
-
-The diagnosis is saturation. Magnitude correlation actually survives in the published-quantile output — |score| vs |LFC| gives ρ = +0.108 across the full panel, and among the top-5% highest-effect variants the signed correlation rises to ρ = +0.271. The model is tracking the right biology. It is the calibration's summary statistic that compresses everything into the same bin.
+3,301 Tewhey 2016 MPRA variants (GSE75661) — regulatory loci drawn from GWAS studies — were scored through AlphaGenome v0.6.1. Raw deltas were obtained for 3,275; the four-way comparison below uses the 3,246 variants with valid values across all four predictors. Allele orientation (vs Ensembl), LFC column choice, and hg19→hg38 lift were verified before the analysis (see `verification/` and `docs/canonical_variants.md`); magnitude correlation already survives in the published-quantile output (|score| vs |LFC| gives ρ = +0.108 across the panel and ρ = +0.271 among the top-5% highest-effect variants), so the model is tracking the right biology — only the calibration's summary statistic compresses it.
 
 Re-quantiling each Tewhey variant against the matched (max-over-tracks) common-variant null built in this work — described in `docs/matched_calibration.md` — recovers the full signal:
 
@@ -129,6 +129,24 @@ For completeness, the empirical CDF of the original-quantile score on regulatory
 ---
 
 ## Methods
+
+```mermaid
+flowchart LR
+    A[gnomAD v3 GraphQL<br/>MAF > 0.01<br/>66 windows × 50 kb<br/>seed = 2026] -->|sample| B[5,933 common<br/>autosomal SNVs]
+    T[Tewhey 2016 MPRA<br/>3,275 variants]
+    B -->|score| M[AlphaGenome v0.6.1<br/>K562 expression tracks<br/>RNA-seq + CAGE + PROCAP]
+    T -->|score| M
+    M -->|aggregate| S[max / mean / median<br/>signed raw delta<br/>per variant]
+    S -->|empirical CDF<br/>of common variants| N[(matched null)]
+    S -->|for Tewhey| Q[matched-statistic quantile<br/>per variant]
+    N -.->|reference| Q
+    Q -->|Spearman + bootstrap CI| R[ρ vs MPRA log fold change]
+    style M fill:#e8e8ee,stroke:#444
+    style N fill:#dde7f0,stroke:#444
+    style R fill:#e0eed4,stroke:#444
+```
+
+*Pipeline shape. Same scoring path runs over both the common-variant null and the Tewhey panel; the per-variant aggregation produces three parallel summary statistics (max/mean/median) that build three parallel matched-calibration nulls. Tewhey variants are then re-quantiled against each null and compared against measured MPRA LFC by Spearman.*
 
 ### Matched-statistic calibration
 
@@ -264,6 +282,8 @@ All scoring results are included so you can inspect the data or regenerate figur
 | `mean_aggregation_comparison.csv` | Tewhey raw-side max vs mean from `analyze_mean_aggregation.py` |
 | `phase3_blood_cache.db` | Original-quantile scores for 393 blood trait GWAS variants |
 | `variants.db` | Ensembl allele resolution cache |
+
+Per-column schemas for every artifact above are documented in [`docs/data_dictionary.md`](docs/data_dictionary.md).
 
 Data sources: Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 · Ensembl REST API · gnomAD v3 GraphQL · AlphaGenome v0.6.1
 
