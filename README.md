@@ -3,17 +3,30 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 
----
+![Hero recovery](figures/hero_recovery.png)
 
-AlphaGenome's published quantile-calibrated scoring uses single-track summary statistics. When max-over-tracks aggregation is applied to these outputs — a common composition for tissue-level variant scoring — saturation collapses signed correlation against measured MPRA log fold change from ρ = 0.123 to ρ = 0.037 (n = 3,246), with 94.9% of regulatory variants pinned at |score| > 0.9. Re-deriving the quantile calibration using max-over-tracks statistics on a common-variant null recovers the full underlying signal at ρ = 0.123 (95% CI [0.088, 0.157], p = 2.5×10⁻¹², n = 3,246).
-
-The mechanism behind that recovery separates cleanly into two parts. The **order-statistic component** is the source of saturation in the published quantile and is real and quantifiable on the null: on the same 5,933 common variants, max-over-tracks raw deltas exceed |0.9| at 0.42% — but mean- and median-over-tracks raw deltas do so at 0.00%. The **regulatory-enrichment component** is residual: after the matched-calibration recipe absorbs the order-statistic effect, ~13% of Tewhey variants still land above |0.9| under any aggregation choice (max, mean, or median give Spearman within each other's CIs — ρ ≈ +0.12). That residual is biology, not a calibration artifact. The fix is methodological: match calibration summary statistics to the use case, and the choice of aggregation downstream of the match becomes a presentation decision rather than a science one.
+*The same 3,246 Tewhey 2016 MPRA variants, scored through AlphaGenome twice. Left: published quantile-calibrated expression score — 94.9% saturated at |score| > 0.9, Spearman vs measured LFC collapsed to ρ = +0.037. Right: matched-statistic re-calibration of the same K562 raw deltas against a common-variant null built from the same summary statistic — distribution populated, ρ = +0.123 (p = 2.5×10⁻¹²). The signal was always there; the published calibration's summary statistic doesn't match the aggregation used downstream.*
 
 ---
 
-![Three-way comparison](figures/three_way_comparison.png)
+- **Published-quantile pile-up.** 94.9% of regulatory variants pin at |score| > 0.9; signed correlation against MPRA log fold change collapses to ρ = +0.037 (n = 3,246).
+- **Matched-statistic re-calibration recovers the signal.** Re-deriving the quantile against a 5,933-variant max-over-tracks common-variant null gives ρ = +0.123 (95% CI [+0.088, +0.157], p = 2.5×10⁻¹², same variants).
+- **Mechanism cleanly separates into two parts.** Swapping max for mean/median aggregation on the same null drops saturation from 0.42% to 0.00% above |0.9| — the order-statistic effect is real and isolated. The ~13% residual saturation on Tewhey under any matched recipe is regulatory enrichment, not order-statistic inflation.
+- **Aggregation choice doesn't matter once matched calibration is in place.** Max, mean, and median give Spearman within each other's CIs on Tewhey (ρ ≈ +0.12); the matched recipe absorbs the choice.
 
-*Distribution of three score variants on Tewhey variants. (A) Original quantile (single-track calibration) — 94.9% saturated at |score| > 0.9. (B) Matched-calibration quantile — full range populated, 12.9% saturated. (C) Raw signed delta — continuous distribution near zero. (D) Phred vs matched-quantile, demonstrating monotonic relationship.*
+The fix is methodological: match calibration summary statistics to the use case, and the choice of aggregation downstream becomes a presentation decision rather than a science one.
+
+## Reproduce in 5 minutes
+
+```bash
+git clone https://github.com/kavya1a/regulatory-score-saturation.git
+cd regulatory-score-saturation
+pip install -r requirements.txt
+make figures                                    # regenerate all figures from cached data
+python analyze_matched_calibration_recipes.py   # three-recipe comparison from scratch
+```
+
+No AlphaGenome API key needed — all scoring outputs are cached in the repo. See [Setup](#setup) for the full path including re-scoring through the API.
 
 ---
 
