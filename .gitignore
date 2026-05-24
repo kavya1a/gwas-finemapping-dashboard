@@ -20,3 +20,6 @@ whole_genome_SNVs.tsv.gz
 
 # Claude memory (project-local)
 .claude/
+
+# Session-spanning working notes (private, not part of the public narrative)
+context.md

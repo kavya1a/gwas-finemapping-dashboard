@@ -1,12 +1,16 @@
-"""Build a matched-statistic calibration distribution for max-over-tracks scores.
+"""Build a matched-statistic calibration distribution for the K562 raw delta.
 
 AlphaGenome's published quantile_score is calibrated against a single-track
 common-variant null. Our pipeline applies a max-over-tracks summary on top of
-that, which inflates saturation. This script builds the matched null: the
-empirical distribution of `raw_max_signed_delta` (max signed raw expression
-delta over K562/blood-lineage RNA_SEQ + CAGE + PROCAP tracks) computed on
-~5,000 random common autosomal variants. Component 3 will then quantile-rank
-each Tewhey variant against this distribution.
+that, which inflates saturation. This script builds the matched null: per-variant
+K562/blood-lineage RNA_SEQ + CAGE + PROCAP expression raw deltas, aggregated
+three ways (max / mean / median), on ~5,000 random common autosomal variants.
+Component 3 then quantile-ranks each Tewhey variant against each of the three
+recipes.
+
+Resume-aware: rows with a successful raw_max but no raw_mean (e.g. cached by
+an earlier version of this script) will be re-scored to backfill mean+median.
+Prior errors are not retried.
 
 Sampling: 66 windows of 50 kb anchored at uniform-random offsets (seed 2026)
 within autosome interiors (>=1 Mb from telomeres), allocated proportional
@@ -258,11 +262,19 @@ def init_cache() -> None:
             maf                   REAL,
             raw_max_signed_delta  REAL,
             single_track_quantile REAL,
+            raw_mean_signed_delta   REAL,
+            raw_median_signed_delta REAL,
             n_expr_tracks         INTEGER,
             error                 TEXT,
             scored_at             INTEGER
         )
     """)
+    # Idempotent backfill of mean/median columns on pre-existing caches.
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(scores)").fetchall()}
+    for col, sqltype in (("raw_mean_signed_delta", "REAL"),
+                         ("raw_median_signed_delta", "REAL")):
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE scores ADD COLUMN {col} {sqltype}")
     conn.commit()
     conn.close()
 
@@ -274,12 +286,15 @@ def save_row(v: dict, entry: dict) -> None:
             """INSERT OR REPLACE INTO scores
                (rsid,chrom,pos,ref,alt,maf,
                 raw_max_signed_delta,single_track_quantile,
+                raw_mean_signed_delta,raw_median_signed_delta,
                 n_expr_tracks,error,scored_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (v["rsid"], v.get("chrom"), v.get("pos"), v.get("ref"),
              v.get("alt"), v.get("maf"),
              entry.get("raw_max_signed_delta"),
              entry.get("single_track_quantile"),
+             entry.get("raw_mean_signed_delta"),
+             entry.get("raw_median_signed_delta"),
              entry.get("n_expr_tracks"),
              entry.get("error"),
              int(time.time())),
@@ -294,11 +309,27 @@ def load_cache() -> dict[str, dict]:
     conn = sqlite3.connect(CACHE_DB)
     rows = conn.execute(
         "SELECT rsid, raw_max_signed_delta, single_track_quantile, "
+        "raw_mean_signed_delta, raw_median_signed_delta, "
         "n_expr_tracks, error FROM scores"
     ).fetchall()
     conn.close()
     return {r[0]: {"raw_max_signed_delta": r[1], "single_track_quantile": r[2],
-                   "n_expr_tracks": r[3], "error": r[4]} for r in rows}
+                   "raw_mean_signed_delta": r[3], "raw_median_signed_delta": r[4],
+                   "n_expr_tracks": r[5], "error": r[6]} for r in rows}
+
+
+def needs_rescoring(entry: dict | None) -> bool:
+    """Re-score if the row is missing (not cached), or has a successful
+    raw_max_signed_delta but no raw_mean_signed_delta (the new column).
+    Skip rows that already have an error — those failed for a reason and
+    will fail again."""
+    if entry is None:
+        return True
+    if entry.get("error") is not None:
+        return False  # already tried, failed; leave alone
+    if entry.get("raw_mean_signed_delta") is None:
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -317,27 +348,33 @@ def load_k562_profile():
 
 
 def extract_max_signed_with_quantile(tidy_df: pd.DataFrame, profile) -> dict:
-    """Mirror of extract_raw_deltas._extract_expression_raw, plus the
-    quantile_score of the same peak-track row (= published single-track
-    quantile of the max-track for this variant).
+    """Per-variant K562 expression stats from one tidy_df.
+
+    Returns:
+      raw_max_signed_delta    — sign(argmax|raw|) * max|raw|  (peak-track)
+      single_track_quantile   — quantile_score of the same peak-track row
+      raw_mean_signed_delta   — arithmetic mean of signed raw across tracks
+      raw_median_signed_delta — median of signed raw across tracks
+      n_expr_tracks           — number of K562 expression tracks contributing
     """
     from scoring.tissue_config import filter_tracks
 
+    empty = {"raw_max_signed_delta": None, "single_track_quantile": None,
+             "raw_mean_signed_delta": None, "raw_median_signed_delta": None,
+             "n_expr_tracks": 0}
+
     if tidy_df is None or tidy_df.empty:
-        return {"raw_max_signed_delta": None, "single_track_quantile": None,
-                "n_expr_tracks": 0}
+        return empty
 
     filtered = filter_tracks(tidy_df, profile)
     ot = filtered["output_type"].astype(str).str.replace("OutputType.", "", regex=False)
     expr = filtered[ot.isin(EXPRESSION_OUTPUT_TYPES)]
     if expr.empty:
-        return {"raw_max_signed_delta": None, "single_track_quantile": None,
-                "n_expr_tracks": 0}
+        return empty
 
     raw = expr["raw_score"].dropna()
     if raw.empty:
-        return {"raw_max_signed_delta": None, "single_track_quantile": None,
-                "n_expr_tracks": 0}
+        return empty
 
     idx_max = raw.abs().idxmax()
     max_signed = float(raw.loc[idx_max])
@@ -345,9 +382,11 @@ def extract_max_signed_with_quantile(tidy_df: pd.DataFrame, profile) -> dict:
     single_track_q = float(sq) if sq is not None and pd.notna(sq) else None
 
     return {
-        "raw_max_signed_delta": max_signed,
-        "single_track_quantile": single_track_q,
-        "n_expr_tracks": int(len(raw)),
+        "raw_max_signed_delta":    max_signed,
+        "single_track_quantile":   single_track_q,
+        "raw_mean_signed_delta":   float(raw.mean()),
+        "raw_median_signed_delta": float(raw.median()),
+        "n_expr_tracks":           int(len(raw)),
     }
 
 
@@ -413,8 +452,13 @@ def _line(i: int, total: int, v: dict, entry: dict, elapsed: float,
     if err:
         flag = f" ERROR={err}"
     else:
+        mean = entry.get("raw_mean_signed_delta")
+        med  = entry.get("raw_median_signed_delta")
+        mean_s = f" mean={mean:+.4f}" if mean is not None else ""
+        med_s  = f" med={med:+.4f}"   if med  is not None else ""
         flag = (f" raw_max={entry['raw_max_signed_delta']:+.4f}"
                 f" q={entry['single_track_quantile']:+.4f}"
+                f"{mean_s}{med_s}"
                 f" n_tracks={entry['n_expr_tracks']}")
     print(f"  [{i+1}/{total}] {v['rsid']}{flag}  ({elapsed:.1f}s)  "
           f"ok={counters['ok']} err={counters['err']} timeout={counters['timeout']}")
@@ -525,7 +569,9 @@ def build_null_and_figure() -> None:
     conn = sqlite3.connect(CACHE_DB)
     df = pd.read_sql_query(
         "SELECT rsid, chrom, pos, ref, alt, maf, "
-        "raw_max_signed_delta, single_track_quantile, n_expr_tracks, error "
+        "raw_max_signed_delta, single_track_quantile, "
+        "raw_mean_signed_delta, raw_median_signed_delta, "
+        "n_expr_tracks, error "
         "FROM scores",
         conn,
     )
@@ -539,41 +585,49 @@ def build_null_and_figure() -> None:
     print(f"\nNull written → {NULL_PARQUET}  ({len(clean):,} clean rows / "
           f"{n_total:,} total / {n_err:,} errors)")
 
-    # Summary stats
-    x = clean["raw_max_signed_delta"].to_numpy(float)
-    q = clean["single_track_quantile"].dropna().to_numpy(float)
-    print("\n=== Summary statistics — raw_max_signed_delta on common variants ===")
-    print(f"  n          = {len(x):,}")
-    print(f"  mean       = {x.mean():+.4f}")
-    print(f"  median     = {np.median(x):+.4f}")
-    print(f"  std        = {x.std():.4f}")
-    print(f"  IQR        = [{np.percentile(x,25):+.4f}, {np.percentile(x,75):+.4f}]")
-    print(f"  range      = [{x.min():+.4f}, {x.max():+.4f}]")
-    print(f"  skew       = {pd.Series(x).skew():+.4f}")
-    print(f"  kurtosis   = {pd.Series(x).kurtosis():+.4f}")
-    print(f"  |delta|>0.9 fraction (saturation flag) = {(np.abs(x)>0.9).mean():.3%}")
-    print(f"  exactly ±1 fraction                   = "
-          f"{((x==1.0) | (x==-1.0)).mean():.3%}")
-    if len(q) > 0:
-        print(f"\n  Comparison: published single_track_quantile (peak-track)")
-        print(f"  |q|>0.9 fraction                      = {(np.abs(q)>0.9).mean():.3%}")
+    # Summary stats — three aggregation recipes plus the published peak-track quantile
+    x_max  = clean["raw_max_signed_delta"].to_numpy(float)
+    x_mean = clean["raw_mean_signed_delta"].dropna().to_numpy(float)
+    x_med  = clean["raw_median_signed_delta"].dropna().to_numpy(float)
+    q      = clean["single_track_quantile"].dropna().to_numpy(float)
 
-    # Histogram
+    def _print_block(name: str, x: np.ndarray) -> None:
+        if len(x) == 0:
+            print(f"\n=== {name}: no data ==="); return
+        print(f"\n=== {name}  (n = {len(x):,}) ===")
+        print(f"  mean       = {x.mean():+.4f}")
+        print(f"  median     = {np.median(x):+.4f}")
+        print(f"  std        = {x.std():.4f}")
+        print(f"  IQR        = [{np.percentile(x,25):+.4f}, {np.percentile(x,75):+.4f}]")
+        print(f"  range      = [{x.min():+.4f}, {x.max():+.4f}]")
+        print(f"  |·|>0.5 fraction = {(np.abs(x)>0.5).mean():.3%}")
+        print(f"  |·|>0.9 fraction = {(np.abs(x)>0.9).mean():.3%}")
+        print(f"  exactly ±1       = {((x==1.0) | (x==-1.0)).mean():.3%}")
+
+    _print_block("Matched null — raw_max_signed_delta (current pipeline)", x_max)
+    _print_block("Matched null — raw_mean_signed_delta (alternative)",    x_mean)
+    _print_block("Matched null — raw_median_signed_delta (alternative)",  x_med)
+    if len(q) > 0:
+        print(f"\n=== Published single_track_quantile (peak-track, for reference) ===")
+        print(f"  n               = {len(q):,}")
+        print(f"  |q|>0.9 fraction = {(np.abs(q)>0.9).mean():.3%}")
+
+    # Histogram (uses the max-aggregation null — primary headline distribution)
     FIG_DIR.mkdir(exist_ok=True)
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    bins = np.linspace(-max(abs(x.min()), abs(x.max()), 1.0),
-                        max(abs(x.min()), abs(x.max()), 1.0), 80)
+    bins = np.linspace(-max(abs(x_max.min()), abs(x_max.max()), 1.0),
+                        max(abs(x_max.min()), abs(x_max.max()), 1.0), 80)
 
     ax = axes[0]
-    ax.hist(x, bins=bins, color="#4575b4", edgecolor="white", alpha=0.85)
+    ax.hist(x_max, bins=bins, color="#4575b4", edgecolor="white", alpha=0.85)
     ax.axvline(0, color="grey", ls=":", lw=0.8)
     ax.axvline(+0.9, color="#d6604d", ls="--", lw=0.7, label="|Δ|=0.9")
     ax.axvline(-0.9, color="#d6604d", ls="--", lw=0.7)
     ax.set_xlabel("raw_max_signed_delta (max signed K562/blood expression Δ)")
     ax.set_ylabel("# common variants")
-    ax.set_title(f"Matched calibration null  (n={len(x):,})")
-    ann = (f"mean={x.mean():+.3f}\nstd={x.std():.3f}\n"
-           f"|Δ|>0.9: {(np.abs(x)>0.9).mean():.1%}")
+    ax.set_title(f"Matched calibration null  (n={len(x_max):,})")
+    ann = (f"mean={x_max.mean():+.3f}\nstd={x_max.std():.3f}\n"
+           f"|Δ|>0.9: {(np.abs(x_max)>0.9).mean():.1%}")
     ax.text(0.97, 0.97, ann, transform=ax.transAxes, ha="right", va="top",
             fontsize=9, family="monospace",
             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#cccccc", alpha=0.9))
@@ -645,8 +699,23 @@ def main() -> None:
         pool = [pool[i] for i in sorted(int(i) for i in idx)]
         print(f"Capped pool to {len(pool):,} variants (seed-deterministic subset)")
 
-    to_score = [v for v in pool if v["rsid"] not in cache]
-    print(f"  {len(cache)} cached, {len(to_score)} to score")
+    to_score = [v for v in pool if needs_rescoring(cache.get(v["rsid"]))]
+    n_full_cached  = sum(1 for v in pool
+                        if v["rsid"] in cache
+                        and not needs_rescoring(cache[v["rsid"]])
+                        and cache[v["rsid"]].get("error") is None)
+    n_prior_errors = sum(1 for v in pool
+                        if v["rsid"] in cache
+                        and cache[v["rsid"]].get("error") is not None)
+    n_needs_mean   = sum(1 for v in pool
+                        if v["rsid"] in cache
+                        and cache[v["rsid"]].get("error") is None
+                        and cache[v["rsid"]].get("raw_mean_signed_delta") is None)
+    print(f"  cached complete (max+mean+median): {n_full_cached}")
+    print(f"  cached but missing mean/median:    {n_needs_mean}  (will re-score)")
+    print(f"  prior errors (skipped):            {n_prior_errors}")
+    print(f"  uncached:                          {len(to_score) - n_needs_mean}")
+    print(f"  → {len(to_score)} total to score")
 
     if not to_score and not args.pilot:
         print("Nothing to score; running post-processing.")
