@@ -246,25 +246,27 @@ make verify
 ├── README.md
 ├── config.yaml                  # tissue profiles, canonical variants, matched_calibration block
 │
-├── batch_score.py               # score GWAS variants → scored_variants.db
 ├── prefetch_variants.py         # GWAS Catalog → preloaded_variants.db
-├── tewhey_analysis.py           # download + score Tewhey MPRA panel
+├── batch_score.py               # score GWAS variants → scored_variants.db
 ├── extract_raw_deltas.py        # raw expression delta extraction (Tewhey)
 ├── build_matched_calibration.py # Component 2: build matched null on common variants (max/mean/median)
-├── analyze_matched_calibration.py # Component 3: 4-way Tewhey re-analysis
-├── analyze_mean_aggregation.py    # Component 4a: raw-side max vs mean on Tewhey
-├── analyze_matched_calibration_recipes.py # Component 4b: three-recipe matched-cal comparison
+├── analyze_matched_calibration.py         # Component 3: 4-way Tewhey re-analysis
+├── analyze_matched_calibration_recipes.py # Component 4: three-recipe matched-cal comparison
+├── analyze_mean_aggregation.py            # raw-side max vs mean on Tewhey
 ├── saturation_figure.py         # saturation CDF figures
 ├── phase2_figures.py            # distribution and LFC-bin figures
 ├── phase3_blood_traits.py       # blood trait replication
+├── make_hero_figure.py          # README hero figure
 ├── gwas_catalog.py              # GWAS Catalog v2 client
 ├── allele_resolver.py           # Ensembl allele resolution + cache
 │
 ├── scoring/                     # AlphaGenome scoring utilities
 ├── verification/                # canonical variant test harness
+├── tests/                       # unit tests
+├── notebooks/                   # Colab-runnable reproduction notebook
 ├── figures/                     # all generated figures
-├── docs/                        # methodology + canonical variants + matched_calibration.md
-└── archive/                     # pre-pivot scripts, kept for reference
+├── docs/                        # methodology + canonical variants + data dictionary
+└── archive/                     # pre-pivot scripts and superseded artifacts
 ```
 
 All scoring results are included so you can inspect the data or regenerate figures without API access:
