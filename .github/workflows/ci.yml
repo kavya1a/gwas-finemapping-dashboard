@@ -1,0 +1,66 @@
+name: reproduce-figures
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  reproduce-from-cache:
+    name: Regenerate figures from cached data (no API key)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Skip alphagenome on CI — it's only needed for API re-scoring,
+          # which we don't do here. All analyses run from cached parquet/db.
+          grep -v "^alphagenome" requirements.txt > requirements.ci.txt
+          pip install -r requirements.ci.txt
+          pip install nbformat nbconvert ipykernel
+
+      - name: Regenerate figures from cache
+        run: |
+          make figures
+
+      - name: Three-recipe matched-calibration analysis
+        run: |
+          python analyze_matched_calibration_recipes.py
+
+      - name: Mean-aggregation raw-side probe
+        run: |
+          python analyze_mean_aggregation.py
+
+      - name: Hero figure
+        run: |
+          python make_hero_figure.py
+
+      - name: Execute reproduction notebook end-to-end
+        run: |
+          jupyter nbconvert --to notebook --execute \
+                            --output reproduce.executed.ipynb \
+                            notebooks/reproduce.ipynb
+
+      - name: Canonical variant tests (3/5 expected to pass — see docs/canonical_variants.md)
+        continue-on-error: true
+        run: |
+          make verify
+
+      - name: Upload regenerated figures as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures
+          path: figures/
+          retention-days: 14
