@@ -33,7 +33,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          pytest tests/ -q
+          python -m pytest tests/ -q
 
       - name: Regenerate figures from cache
         run: |
