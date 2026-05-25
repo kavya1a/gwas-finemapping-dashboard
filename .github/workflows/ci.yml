@@ -31,6 +31,10 @@ jobs:
           pip install -r requirements.ci.txt
           pip install nbformat nbconvert ipykernel
 
+      - name: Run unit tests
+        run: |
+          pytest tests/ -q
+
       - name: Regenerate figures from cache
         run: |
           make figures
