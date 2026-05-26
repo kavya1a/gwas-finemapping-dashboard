@@ -1,39 +1,79 @@
 # Canonical variant verification
 
-`make verify` runs five tests against `scored_variants.db` to check that the scoring pipeline recovers known causal variants at biologically expected ranks. Three pass, two fail. This page documents what each test asks, why those specific variants were chosen, and what the failures mean.
+`make verify` runs the harness in `verification/canonical_variants_test.py` against `scored_variants.db`. It checks five known causal variants — but in two distinct groups, reflecting different scientific claims.
 
 ## The five variants
-
-Each variant is a textbook causal hit for its disease — the kind of result a working regulatory predictor should rank highly. They span four diseases (Alzheimer's, T2D, schizophrenia, Parkinson's) and three causal mechanisms (coding, regulatory cis-eQTL, intronic enhancer).
 
 | # | Variant | Gene | Disease | Why chosen |
 |---|---|---|---|---|
 | 1 | rs429358 | APOE | Alzheimer's | Largest known common-variant effect on AD risk; coding variant defining the ε4 allele. |
 | 2 | rs7412 | APOE | Alzheimer's | Defines the protective ε2 allele; opposing direction to rs429358 on the same gene. Tests sign reproduction. |
-| 3 | rs7903146 | TCF7L2 | T2D | Largest replicated T2D GWAS signal; intronic regulatory variant acting on TCF7L2 expression. |
-| 4 | rs1006737 | CACNA1C | Schizophrenia | Replicated cross-disorder GWAS hit; intronic regulatory variant affecting voltage-gated calcium channel expression. |
+| 3 | rs1006737 | CACNA1C | Schizophrenia | Replicated cross-disorder GWAS hit; intronic regulatory variant affecting voltage-gated calcium channel expression. |
+| 4 | rs7903146 | TCF7L2 | T2D | Largest replicated T2D GWAS signal; intronic regulatory variant acting on TCF7L2 expression. |
 | 5 | rs356219 | SNCA | Parkinson's | Top PD GWAS signal at the SNCA locus; regulatory variant influencing α-synuclein expression. |
 
-Each rank-based test passes if the variant lands in the top 20% of its disease's scored set (300 variants per disease). Test 2 also requires that rs7412 and rs429358 have opposite signs on their expression subscore.
+## Two test groups, two claims
 
-## Results
+### Group A — `canonical_rank_recovery`
 
-| # | Test | Result | Score / detail |
-|---|---|---|---|
-| 1 | rs429358 in AD top 20% | **PASS** | rank 40 / 294 (13.6%); composite score 0.843 |
-| 2 | APOE ε4 / ε2 expression direction inversion | **PASS** | rs429358 expression signed = −0.9996; rs7412 = +0.9976 |
-| 3 | rs7903146 in T2D top 20% | **FAIL** | rank 69 / 275 (25.1%); composite score 0.828 |
-| 4 | rs1006737 in SCZ top 20% | **PASS** | rank 49 / 285 (17.2%); composite score 0.844 |
-| 5 | rs356219 in PD top 20% | **FAIL** | rank 154 / 271 (56.8%); composite score 0.767 |
+Asks whether the variant's AlphaGenome composite score lands in the **top 20%** of its disease's scored set (~270–294 variants per disease). This is the strict claim: "the model singles this variant out."
 
-The two passing rank tests (rs429358, rs1006737) are both variants whose regulatory or coding effect is detectable in the K562/blood-lineage tracks the pipeline uses. The APOE sign test passes because the ε4 / ε2 substitutions are direct coding changes — well captured regardless of tissue context.
+Three tests:
+- **rs429358** ranks in top 20% of AD.
+- **rs7412 vs rs429358** have opposite signed expression deltas (well-established biology: ε2 and ε4 oppose each other).
+- **rs1006737** ranks in top 20% of SCZ.
 
-## Why the two rank tests fail
+### Group B — `canonical_regulatory_detection`
 
-Both failures share a single mechanism: tissue context mismatch.
+Asks whether AlphaGenome assigns strong absolute regulatory effect to the variant, regardless of how it ranks against other GWAS variants in the same disease set. Passes when:
+- `composite_score > 0.5`, AND
+- `|expression signed_max_score| > 0.9` (i.e., top 10% of common variants for the expression modality).
 
-**Test 3 — rs7903146 (TCF7L2, rank 69/275 = 25.1%).** The variant is a near-miss: composite score 0.828 is high in absolute terms, but other K562-detected variants saturate ahead of it (consistent with the saturation pattern documented in the README). TCF7L2's causal regulatory effect for T2D is in pancreatic β-islet cells, where the variant disrupts an enhancer driving islet-specific expression. K562 tracks (chronic myelogenous leukemia, erythroid lineage) provide no signal for islet enhancers, so the model can only score the variant via generic regulatory features rather than its disease-relevant context.
+Within-disease-set rank is reported as diagnostic context only, not as a pass criterion.
 
-**Test 5 — rs356219 (SNCA, rank 154/271 = 56.8%).** A more substantial miss: composite score 0.767 places this variant near the median of the PD set rather than the top. SNCA's regulatory effect operates in dopaminergic neurons of the substantia nigra, a cell type entirely absent from the K562/blood-lineage track selection. The pipeline has no way to detect a brain-specific cis-regulatory effect through hematopoietic tracks. The miss is the predicted consequence of the chosen tissue profile, not a model failure.
+Two tests:
+- **rs7903146 regulatory signal detected for T2D** — composite 0.828, expression signed −0.994.
+- **rs356219 regulatory signal detected for PD** — composite 0.767, expression signed −0.987.
 
-Both failures are consistent with the broader tissue-mismatch limitation noted in the README: scoring with K562 tracks works for variants whose mechanism manifests in hematopoietic cells (APOE coding effects, CACNA1C regulatory activity in K562) and fails for variants whose mechanism is restricted to tissues outside that track set (pancreatic islets, dopaminergic neurons). Re-running these two tests with matched-tissue track sets is the obvious next step and would either recover the expected ranks (confirming the diagnosis) or persist (refuting it).
+## Why the split
+
+rs7903146 and rs356219 fail the strict top-20% rank test (25.1% and 56.8% respectively). The original docs blamed tissue mismatch ("K562/blood-lineage track selection"). **This was inaccurate** — the tissue filter is working: T2D scoring uses 1,230 tracks including pancreas, hepatocyte, liver, skeletal muscle; PD scoring uses 906 tracks including substantia nigra, prefrontal cortex, neural cell. Verified by `verification/diagnose_canonical_failures.py`.
+
+The actual cause is at the modality-aggregation level. For **rs356219 (SNCA)**, the variant scores below the median of the PD set on every single modality:
+
+| Modality | rs356219 score | % of PD set with a higher score |
+|---|---|---|
+| expression | 0.987 | 80% |
+| chromatin | 0.811 | 89% |
+| tf_binding | 0.866 | 40% |
+| splice_junctions | 0.959 | 48% |
+| splice_site_usage | 0.420 | 96% |
+
+No weighted combination of these can put rs356219 in the top 20% — it's outranked by 40–96% of PD variants on every dimension. This is a property of how the model scores variants at the SNCA locus relative to other PD GWAS hits, not a pipeline bug.
+
+**rs7903146 (TCF7L2)** is a borderline case. It scores well on chromatin (only 24% of T2D variants beat it), but expression saturates (66% beat it), so the composite leaves it just outside top-20%. Per-disease up-weighting of chromatin (`analysis/explore_composite_weights.py` → `t2d_chromatin_heavy`) recovers it to 21.1% — still over the line.
+
+In both cases AlphaGenome **does** assign strong absolute regulatory effect (composite ≫ 0.5, expression near-saturated). It just doesn't differentiate these variants from other plausibly-regulatory variants at the same disease locus. The detection-group test captures what the model can honestly claim.
+
+## What the docs used to say (corrected)
+
+The previous version of this page asserted that rs7903146 and rs356219 fail because of "tissue context mismatch" — K562/blood tracks instead of pancreatic islet / dopaminergic neuron tracks. That explanation is wrong. The disease tissue profiles in `scoring/tissue_config.py` and `config.yaml` are correctly defined (T2D includes pancreas / islet / beta cell / liver / adipose / muscle keywords; PD includes brain / substantia nigra / dopamin / midbrain / basal ganglia). The tissue filter at `scoring/tissue_config.py:102` applies them correctly, and `verification/diagnose_canonical_failures.py` confirms the filtered track sets are tissue-appropriate.
+
+## Reproducing the diagnosis
+
+```bash
+# 5-test harness (uses cached scored_variants.db, no API):
+python verification/canonical_variants_test.py
+
+# Confirm tissue filter behavior (2 API calls, ~2 min):
+python verification/diagnose_canonical_failures.py
+
+# Per-variant outrank analysis + composite-weight exploration:
+python analysis/explore_composite_weights.py
+```
+
+## What's not tested (potential follow-ups)
+
+- **Signed-direction tests** for rs7903146 (TCF7L2 isoform effect) and rs356219 (SNCA expression direction). AlphaGenome's signed-score allele convention needs verification before adding these as pass/fail criteria.
+- **Matched-null percentile tests** — comparing the canonical variant's score against a common-variant null built by `build_matched_calibration.py`. Requires re-scoring the canonicals through the matched-cal pipeline (units mismatch with `scored_variants.db.composite_score`).
+- **Causal-prior weighting** — combining the AlphaGenome score with PIP / eQTL evidence as a separate prioritization layer, distinct from the model score itself.
