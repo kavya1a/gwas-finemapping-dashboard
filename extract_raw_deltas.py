@@ -21,7 +21,6 @@ Run:
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import io
 import os
 import sqlite3
@@ -180,21 +179,11 @@ def _extract_expression_raw(tidy_df: pd.DataFrame, profile) -> dict:
     }
 
 
-def _score_one(model, variant_input, tissue_profile, rsid: str) -> dict:
-    from scoring.composite import score_single_variant
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(score_single_variant, model, variant_input, tissue_profile)
-    try:
-        result = future.result(timeout=VARIANT_TIMEOUT_SECS)
-        if result.get("error"):
-            return {"error": result["error"]}
-        return _extract_expression_raw(result.get("tidy_df"), tissue_profile)
-    except concurrent.futures.TimeoutError:
-        return {"error": "api_timeout"}
-    except Exception as exc:
-        return {"error": str(exc)}
-    finally:
-        executor.shutdown(wait=False)
+def _score_variant_via_worker(worker, variant_input, tissue_profile) -> dict:
+    result = worker.score(variant_input, tissue_profile, timeout=VARIANT_TIMEOUT_SECS)
+    if result.get("error"):
+        return {"error": result["error"]}
+    return _extract_expression_raw(result.get("tidy_df"), tissue_profile)
 
 
 # ---------------------------------------------------------------------------
@@ -405,49 +394,52 @@ def main() -> None:
     print(f"  {len(cache)} cached, {len(to_score)} to score (~{len(to_score)*2//60} min at 2s/variant)")
 
     if to_score:
-        from alphagenome.models import dna_client
         from scoring.composite import VariantInput
+        from scoring.score_worker import ScoreWorker
 
         profile = _load_k562_profile()
-        model = dna_client.create(api_key)
+        worker = ScoreWorker(api_key)
         ok = err = timeout = 0
 
-        for i, row in enumerate(to_score):
-            rsid = row.rsid
-            chrom = str(row.chrom) if str(row.chrom).startswith("chr") else f"chr{row.chrom}"
+        try:
+            for i, row in enumerate(to_score):
+                rsid = row.rsid
+                chrom = str(row.chrom) if str(row.chrom).startswith("chr") else f"chr{row.chrom}"
 
-            if not (isinstance(row.ref, str) and isinstance(row.alt, str)
-                    and row.ref and row.alt):
-                _save_raw_delta(rsid, {"error": "missing_alleles"})
-                err += 1
-                continue
+                if not (isinstance(row.ref, str) and isinstance(row.alt, str)
+                        and row.ref and row.alt):
+                    _save_raw_delta(rsid, {"error": "missing_alleles"})
+                    err += 1
+                    continue
 
-            vi = VariantInput(
-                rsid=rsid, chrom=chrom, pos=int(row.pos),
-                ref=row.ref, alt=row.alt, maf=None, p_value=None,
-            )
+                vi = VariantInput(
+                    rsid=rsid, chrom=chrom, pos=int(row.pos),
+                    ref=row.ref, alt=row.alt, maf=None, p_value=None,
+                )
 
-            t0 = time.monotonic()
-            entry = _score_one(model, vi, profile, rsid)
-            elapsed = time.monotonic() - t0
+                t0 = time.monotonic()
+                entry = _score_variant_via_worker(worker, vi, profile)
+                elapsed = time.monotonic() - t0
 
-            _save_raw_delta(rsid, entry)
+                _save_raw_delta(rsid, entry)
 
-            if entry.get("error"):
-                err += 1 if entry["error"] != "api_timeout" else 0
-                timeout += 1 if entry["error"] == "api_timeout" else 0
-                flag = f" ERROR={entry['error']}"
-            else:
-                ok += 1
-                flag = (f" max_raw={entry['max_signed_raw']:+.4f}"
-                        f" n_tracks={entry['n_expr_tracks']}")
+                if entry.get("error"):
+                    err += 1 if entry["error"] != "api_timeout" else 0
+                    timeout += 1 if entry["error"] == "api_timeout" else 0
+                    flag = f" ERROR={entry['error']}"
+                else:
+                    ok += 1
+                    flag = (f" max_raw={entry['max_signed_raw']:+.4f}"
+                            f" n_tracks={entry['n_expr_tracks']}")
 
-            print(f"  [{i+1}/{len(to_score)}] {rsid}{flag}  ({elapsed:.1f}s)")
+                print(f"  [{i+1}/{len(to_score)}] {rsid}{flag}  ({elapsed:.1f}s)")
 
-            # Stop condition: >10% timeout rate after first 50 variants
-            if i >= 50 and timeout / (i + 1) > 0.10:
-                print(f"!! Timeout rate {timeout/(i+1):.1%} exceeds 10% — stopping")
-                break
+                # Stop condition: >10% timeout rate after first 50 variants
+                if i >= 50 and timeout / (i + 1) > 0.10:
+                    print(f"!! Timeout rate {timeout/(i+1):.1%} exceeds 10% — stopping")
+                    break
+        finally:
+            worker.close()
 
         print(f"\nDone: {ok} ok / {err} error / {timeout} timeout")
 

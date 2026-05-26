@@ -16,7 +16,6 @@ Run:
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import os
 import re
 import sqlite3
@@ -230,24 +229,15 @@ def _get_expression_subscore(result: dict) -> float | None:
     return float(row.get("signed_max_score")) if row.get("signed_max_score") is not None else None
 
 
-def _score_one(model, variant_input, profile, rsid: str) -> dict:
-    from scoring.composite import score_single_variant
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(score_single_variant, model, variant_input, profile)
-    try:
-        result = future.result(timeout=VARIANT_TIMEOUT_SECS)
-        if result.get("error"):
-            return {"error": result["error"], "expression_subscore": None}
-        return {"expression_subscore": _get_expression_subscore(result), "error": None}
-    except concurrent.futures.TimeoutError:
-        return {"error": "api_timeout", "expression_subscore": None}
-    except Exception as exc:
-        return {"error": str(exc), "expression_subscore": None}
-    finally:
-        executor.shutdown(wait=False)
+def _score_one(worker, variant_input, profile, rsid: str) -> dict:
+    result = worker.score(variant_input, profile, timeout=VARIANT_TIMEOUT_SECS)
+    err = result.get("error") if isinstance(result, dict) else None
+    if err:
+        return {"error": err, "expression_subscore": None}
+    return {"expression_subscore": _get_expression_subscore(result), "error": None}
 
 
-def _score_trait(trait: str, variants: list[dict], model, profile) -> list[float]:
+def _score_trait(trait: str, variants: list[dict], worker, profile) -> list[float]:
     from scoring.composite import VariantInput
 
     cache = _load_cache(trait)
@@ -287,7 +277,7 @@ def _score_trait(trait: str, variants: list[dict], model, profile) -> list[float
             counters["error"] += 1
             continue
 
-        result = _score_one(model, vi, profile, rsid)
+        result = _score_one(worker, vi, profile, rsid)
         error = result.get("error")
         score = result.get("expression_subscore")
 
@@ -470,26 +460,29 @@ def main() -> None:
         n_resolved = sum(1 for v in all_variants[trait] if v.get("ref") and v.get("alt"))
         print(f"  Resolved: {n_resolved}/{len(variants)}")
 
-    # Step 3: Load AlphaGenome model
-    print("\nLoading AlphaGenome model...")
-    from alphagenome.models import dna_client
-    model = dna_client.create(api_key=os.environ["ALPHAGENOME_API_KEY"])
+    # Step 3: Spawn scoring worker
+    print("\nSpawning AlphaGenome scoring worker...")
+    from scoring.score_worker import ScoreWorker
     profile = _load_k562_profile()
-    print("  Model loaded.")
+    worker = ScoreWorker(api_key=os.environ["ALPHAGENOME_API_KEY"])
+    print("  Worker spawned.")
 
     # Step 4: Score
     print("\nScoring variants (this will take several hours — resumable)...")
     blood_scores: dict[str, np.ndarray] = {}
-    for trait, variants in all_variants.items():
-        print(f"\n[{trait}]")
-        scores = _score_trait(trait, variants, model, profile)
-        arr = np.array([s for s in scores if s is not None], dtype=float)
-        blood_scores[trait] = arr
+    try:
+        for trait, variants in all_variants.items():
+            print(f"\n[{trait}]")
+            scores = _score_trait(trait, variants, worker, profile)
+            arr = np.array([s for s in scores if s is not None], dtype=float)
+            blood_scores[trait] = arr
 
-        if len(arr) > 0:
-            pct_sat = (np.abs(arr) > 0.9).mean()
-            print(f"  {trait}: n={len(arr)}, |score|>0.9: {pct_sat:.1%}, "
-                  f"median|score|={np.median(np.abs(arr)):.4f}")
+            if len(arr) > 0:
+                pct_sat = (np.abs(arr) > 0.9).mean()
+                print(f"  {trait}: n={len(arr)}, |score|>0.9: {pct_sat:.1%}, "
+                      f"median|score|={np.median(np.abs(arr)):.4f}")
+    finally:
+        worker.close()
 
     # Step 5: Gate 3 check
     print("\n=== Gate 3 Check ===")

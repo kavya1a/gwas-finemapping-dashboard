@@ -11,7 +11,6 @@ Design principles:
 
 from __future__ import annotations
 
-import concurrent.futures
 import os
 import re
 import sqlite3
@@ -211,64 +210,62 @@ def _already_scored(disease: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 def _score_one_with_timeout(
-    model,
+    worker,
     variant_input,
     tissue_profile,
     rsid: str,
     disease: str,
 ) -> dict | None:
-    """Score a single variant with a 60-second wall-clock timeout.
+    """Score a single variant via the subprocess worker with a 60-second
+    wall-clock timeout. Returns result dict on success, None on timeout (already
+    logged + marked).
 
-    Returns result dict on success, None on timeout (already logged + marked).
-    Creates a fresh ThreadPoolExecutor per call so a timed-out thread never
-    blocks a subsequent submission.
+    score_single_variant catches its own exceptions and returns a full-shape
+    error result (with composite_score=None and error=<msg>); those pass through
+    untouched. A worker-level exception (e.g. process crash, unexpected raise)
+    surfaces as a minimal {"error": <str>} dict — those go through the rate-
+    limit / sequence-length defensive branches.
     """
-    from scoring.composite import score_single_variant
+    result = worker.score(variant_input, tissue_profile, timeout=VARIANT_TIMEOUT_SECS)
+    err = result.get("error") if isinstance(result, dict) else None
 
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(score_single_variant, model, variant_input, tissue_profile)
-
-    try:
-        return future.result(timeout=VARIANT_TIMEOUT_SECS)
-    except concurrent.futures.TimeoutError:
+    if err == "api_timeout":
         _log_timeout(rsid, disease)
         _mark_preloaded(rsid, disease, "api_timeout")
         print(f"  TIMEOUT ({VARIANT_TIMEOUT_SECS}s): {rsid} — logged, skipping")
         return None
-    except Exception as exc:
-        err_str = str(exc).lower()
-        if any(k in err_str for k in ("rate", "quota", "limit", "429")):
+
+    if err and "composite_score" not in result:
+        err_low = err.lower()
+        if any(k in err_low for k in ("rate", "quota", "limit", "429")):
             _write_blocker(
-                f"AlphaGenome API rate limit hit scoring {rsid} ({disease}): {exc}\n"
+                f"AlphaGenome API rate limit hit scoring {rsid} ({disease}): {err}\n"
                 "Stopping to avoid further charges."
             )
-            executor.shutdown(wait=False)
             sys.exit(1)
         # Variants within ~524kb of a chromosome end cannot be scored: the 1Mb
         # context model requires at least 524,288bp of flanking sequence on each
         # side, and positions closer than that to a telomere produce an
-        # unsupported sequence-length error.  Tag distinctly so the yield report
-        # can separate these from true API failures.
-        if "sequence length" in err_str and "not supported" in err_str:
+        # unsupported sequence-length error.
+        if "sequence length" in err_low and "not supported" in err_low:
             _mark_preloaded(rsid, disease, "insufficient_flanking_sequence")
-            print(f"  Flanking seq too short {rsid}: {exc}")
+            print(f"  Flanking seq too short {rsid}: {err}")
             return {
                 "rsid": rsid, "chrom": None, "pos": None, "ref": None, "alt": None,
                 "maf": None, "composite_score": None, "pip_weighted_score": None,
                 "pip": None, "rare_variant_caution": False,
-                "error": str(exc), "modality_breakdown": None, "tidy_df": None,
+                "error": err, "modality_breakdown": None, "tidy_df": None,
             }
-        # Other API errors: record and continue
         _mark_preloaded(rsid, disease, "api_error")
-        print(f"  API error {rsid}: {exc}")
+        print(f"  API error {rsid}: {err}")
         return {
             "rsid": rsid, "chrom": None, "pos": None, "ref": None, "alt": None,
             "maf": None, "composite_score": None, "pip_weighted_score": None,
             "pip": None, "rare_variant_caution": False,
-            "error": str(exc), "modality_breakdown": None, "tidy_df": None,
+            "error": err, "modality_breakdown": None, "tidy_df": None,
         }
-    finally:
-        executor.shutdown(wait=False)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -297,55 +294,58 @@ def _write_run_metadata(
 
 def _score_disease(disease: str, to_score: list[dict], api_key: str, run_id: str) -> dict:
     """Score all variants for one disease, writing incrementally. Returns counters."""
-    from alphagenome.models import dna_client
-    from scoring.composite import VariantInput, _build_interval
+    from scoring.composite import VariantInput
+    from scoring.score_worker import ScoreWorker
     from scoring.tissue_config import get_profile
 
     profile = get_profile(disease)
-    model = dna_client.create(api_key)
+    worker = ScoreWorker(api_key)
 
     counters = {"ok": 0, "error": 0, "timeout": 0, "skipped": 0}
     started_at = int(time.time())
 
-    for i, v in enumerate(to_score):
-        rsid = v["rsid"]
-        chrom = v["chrom"] if v["chrom"].startswith("chr") else f"chr{v['chrom']}"
+    try:
+        for i, v in enumerate(to_score):
+            rsid = v["rsid"]
+            chrom = v["chrom"] if v["chrom"].startswith("chr") else f"chr{v['chrom']}"
 
-        # Belt-and-suspenders allele check
-        if not (v.get("ref") and v.get("alt") and
-                _VALID_BASES.match(v["ref"]) and _VALID_BASES.match(v["alt"])):
-            _mark_preloaded(rsid, disease, "indel_not_supported")
-            counters["skipped"] += 1
-            continue
+            # Belt-and-suspenders allele check
+            if not (v.get("ref") and v.get("alt") and
+                    _VALID_BASES.match(v["ref"]) and _VALID_BASES.match(v["alt"])):
+                _mark_preloaded(rsid, disease, "indel_not_supported")
+                counters["skipped"] += 1
+                continue
 
-        variant_input = VariantInput(
-            rsid=rsid,
-            chrom=chrom,
-            pos=int(v["pos"]),
-            ref=v["ref"],
-            alt=v["alt"],
-            maf=v.get("maf"),
-            p_value=v.get("p_value"),
-        )
+            variant_input = VariantInput(
+                rsid=rsid,
+                chrom=chrom,
+                pos=int(v["pos"]),
+                ref=v["ref"],
+                alt=v["alt"],
+                maf=v.get("maf"),
+                p_value=v.get("p_value"),
+            )
 
-        t0 = time.monotonic()
-        result = _score_one_with_timeout(model, variant_input, profile, rsid, disease)
-        elapsed = time.monotonic() - t0
+            t0 = time.monotonic()
+            result = _score_one_with_timeout(worker, variant_input, profile, rsid, disease)
+            elapsed = time.monotonic() - t0
 
-        if result is None:
-            counters["timeout"] += 1
-            continue
+            if result is None:
+                counters["timeout"] += 1
+                continue
 
-        _save_single_result(result, disease)
+            _save_single_result(result, disease)
 
-        if result.get("error"):
-            counters["error"] += 1
-            flag = " ERROR"
-        else:
-            counters["ok"] += 1
-            flag = f" composite={result['composite_score']:.4f}"
+            if result.get("error"):
+                counters["error"] += 1
+                flag = " ERROR"
+            else:
+                counters["ok"] += 1
+                flag = f" composite={result['composite_score']:.4f}"
 
-        print(f"  [{i+1}/{len(to_score)}] {rsid}{flag}  ({elapsed:.1f}s)")
+            print(f"  [{i+1}/{len(to_score)}] {rsid}{flag}  ({elapsed:.1f}s)")
+    finally:
+        worker.close()
 
     _write_run_metadata(run_id, disease, started_at, counters)
     return counters

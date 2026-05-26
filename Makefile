@@ -1,4 +1,4 @@
-.PHONY: install figures phase1 phase2 phase3 raw-full matched_calibration verify help
+.PHONY: install figures phase1 phase2 phase3 raw-full matched_calibration pipeline verify help
 
 PYTHON := python3.11
 
@@ -11,6 +11,7 @@ help:
 	@echo "  phase3               Blood trait replication figure"
 	@echo "  raw-full             Score full 3,259-variant Tewhey panel (requires API, ~8 hrs)"
 	@echo "  matched_calibration  Build matched null + run 4-way Tewhey comparison (requires API, ~70 min)"
+	@echo "  pipeline             Full from-scratch: prefetch GWAS + score GWAS + Tewhey raw deltas (~20 hrs API)"
 	@echo "  verify               Run canonical variant tests"
 
 install:
@@ -53,6 +54,24 @@ figures/tewhey_raw_delta_full_results.png: tewhey_mpra.parquet
 matched_calibration:
 	$(PYTHON) build_matched_calibration.py
 	$(PYTHON) analyze_matched_calibration.py
+
+# ── Full from-scratch pipeline (~20 hours of API) ────────────────────────────
+# Matches the README's "fetch, score GWAS, score Tewhey, raw-delta extraction"
+# path. matched_calibration is a separate target — run it explicitly if needed.
+# The GWAS branch (prefetch → batch_score) and the Tewhey branch (extract_raw_deltas)
+# are independent — make will run them sequentially in declared order.
+#   prefetch_variants.py    GWAS Catalog → preloaded_variants.db
+#   batch_score.py          AlphaGenome  → scored_variants.db
+#   extract_raw_deltas.py   Tewhey raw   → tewhey_raw_delta_cache.db
+#                                          + figures/tewhey_raw_delta_full_results.png
+
+pipeline: scored_variants.db figures/tewhey_raw_delta_full_results.png
+
+preloaded_variants.db:
+	$(PYTHON) prefetch_variants.py
+
+scored_variants.db: preloaded_variants.db
+	$(PYTHON) batch_score.py
 
 # ── Verification ──────────────────────────────────────────────────────────────
 

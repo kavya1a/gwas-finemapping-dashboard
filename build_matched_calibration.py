@@ -398,33 +398,41 @@ class RateLimitError(RuntimeError):
     """Raised to bail the entire run on suspected gating."""
 
 
-def score_one(model, vi, profile) -> dict:
-    """60-second timeout. On rate-limit signal, raises RateLimitError so the
-    main thread can stop the run cleanly."""
-    from scoring.composite import score_single_variant
+def score_one(worker, vi, profile) -> dict:
+    """60-second timeout via subprocess worker. Raises RateLimitError on
+    suspected rate-limiting so the main thread can stop the run cleanly.
 
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(score_single_variant, model, vi, profile)
-    try:
-        result = future.result(timeout=VARIANT_TIMEOUT_SECS)
-        if result.get("error"):
-            return {"error": result["error"]}
-        return extract_max_signed_with_quantile(result.get("tidy_df"), profile)
-    except concurrent.futures.TimeoutError:
+    The worker's .score() is uniform across ScoreWorker (serial) and
+    ScoreWorkerPool (parallel) — both expose the same call signature.
+    """
+    result = worker.score(vi, profile, timeout=VARIANT_TIMEOUT_SECS)
+    err = result.get("error") if isinstance(result, dict) else None
+
+    if err == "api_timeout":
         return {"error": "api_timeout"}
-    except Exception as exc:
-        msg = str(exc).lower()
+
+    if err and "composite_score" not in result:
+        # Worker-level exception path (rare — score_single_variant catches
+        # most things and returns a full-shape error dict instead).
+        msg = err.lower()
         if any(k in msg for k in ("rate", "quota", "limit", "429")):
-            raise RateLimitError(str(exc)) from exc
+            raise RateLimitError(err)
         if "sequence length" in msg and "not supported" in msg:
             return {"error": "insufficient_flanking_sequence"}
-        return {"error": str(exc)}
-    finally:
-        executor.shutdown(wait=False)
+        return {"error": err}
+
+    if err:
+        return {"error": err}
+
+    return extract_max_signed_with_quantile(result.get("tidy_df"), profile)
 
 
-def score_variant_dispatch(model, profile, v: dict) -> tuple[dict, dict, float]:
-    """Worker entry. Returns (input_v, entry_dict, elapsed_seconds)."""
+def score_variant_dispatch(worker, profile, v: dict) -> tuple[dict, dict, float]:
+    """Worker entry. Returns (input_v, entry_dict, elapsed_seconds).
+
+    `worker` is a ScoreWorker (serial) or ScoreWorkerPool (parallel) — both
+    expose a thread-safe .score(vi, profile, timeout=...) method.
+    """
     from scoring.composite import VariantInput
 
     rsid = v["rsid"]
@@ -438,7 +446,7 @@ def score_variant_dispatch(model, profile, v: dict) -> tuple[dict, dict, float]:
         return v, {"error": f"input_error:{exc}"}, 0.0
 
     t0 = time.monotonic()
-    entry = score_one(model, vi, profile)
+    entry = score_one(worker, vi, profile)
     return v, entry, time.monotonic() - t0
 
 
@@ -464,14 +472,14 @@ def _line(i: int, total: int, v: dict, entry: dict, elapsed: float,
           f"ok={counters['ok']} err={counters['err']} timeout={counters['timeout']}")
 
 
-def run_serial(variants: list[dict], model, profile,
+def run_serial(variants: list[dict], worker, profile,
                max_n: int | None = None) -> dict:
     """Pilot path: serial loop, prints per-variant lines, no DB lock contention."""
     counters = {"ok": 0, "err": 0, "timeout": 0}
     total = len(variants) if max_n is None else min(max_n, len(variants))
     for i, v in enumerate(variants[:total]):
         try:
-            v, entry, elapsed = score_variant_dispatch(model, profile, v)
+            v, entry, elapsed = score_variant_dispatch(worker, profile, v)
         except RateLimitError as exc:
             print(f"!! Rate limit hit on {v['rsid']}: {exc}\n   Stopping.")
             sys.exit(1)
@@ -486,9 +494,11 @@ def run_serial(variants: list[dict], model, profile,
     return counters
 
 
-def run_parallel(variants: list[dict], model, profile) -> dict:
-    """Full path: 4-way ThreadPool over variants. Each task wraps its own
-    inner timeout. Aborts on any RateLimitError."""
+def run_parallel(variants: list[dict], pool, profile) -> dict:
+    """Full path: 4-way ThreadPool over variants, dispatching each call to the
+    subprocess `pool`. Each task uses pool.score() which checks out a free
+    subprocess worker; on timeout that worker is killed + respawned. Aborts on
+    any RateLimitError."""
     counters = {"ok": 0, "err": 0, "timeout": 0}
     total = len(variants)
     saturated = []  # raw_max_signed_delta values for the 200-variant stop check
@@ -502,7 +512,7 @@ def run_parallel(variants: list[dict], model, profile) -> dict:
         if rate_limit_hit.is_set():
             return v, {"error": "aborted_rate_limit"}, 0.0
         try:
-            return score_variant_dispatch(model, profile, v)
+            return score_variant_dispatch(pool, profile, v)
         except RateLimitError as exc:
             rate_limit_msg.append(str(exc))
             rate_limit_hit.set()
@@ -722,17 +732,20 @@ def main() -> None:
         build_null_and_figure()
         return
 
-    print("\n=== Step 2: load AlphaGenome model ===")
-    from alphagenome.models import dna_client
-    model = dna_client.create(api_key)
+    print("\n=== Step 2: load K562 profile + spawn scoring workers ===")
+    from scoring.score_worker import ScoreWorker, ScoreWorkerPool
     profile = load_k562_profile()
-    print("Model + K562 profile loaded.")
+    print("K562 profile loaded.")
 
     if args.pilot:
         print(f"\n=== PILOT: {PILOT_N} variants serial ===")
         # Pilot picks the first PILOT_N variants from the new (uncached) list
         pilot_set = to_score[:PILOT_N] if to_score else pool[:PILOT_N]
-        counters = run_serial(pilot_set, model, profile, max_n=PILOT_N)
+        worker = ScoreWorker(api_key)
+        try:
+            counters = run_serial(pilot_set, worker, profile, max_n=PILOT_N)
+        finally:
+            worker.close()
         print(f"\nPilot result: ok={counters['ok']} err={counters['err']} "
               f"timeout={counters['timeout']}")
         if counters['ok'] == 0:
@@ -747,7 +760,11 @@ def main() -> None:
         return
 
     print(f"\n=== Step 3: parallel scoring (workers={PARALLEL_WORKERS}) ===")
-    counters = run_parallel(to_score, model, profile)
+    worker_pool = ScoreWorkerPool(PARALLEL_WORKERS, api_key)
+    try:
+        counters = run_parallel(to_score, worker_pool, profile)
+    finally:
+        worker_pool.close()
     print(f"\nParallel run complete: ok={counters['ok']} err={counters['err']} "
           f"timeout={counters['timeout']}")
 
