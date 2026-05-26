@@ -19,11 +19,24 @@ import queue as _queue
 import threading
 
 
-def _worker_main(api_key, req_q, res_q):
+def _default_score_factory(api_key):
+    """Build the live AlphaGenome scoring callable (the default subprocess body).
+
+    Returns a function `(variant_input, tissue_profile) -> dict`. Tests inject
+    stub factories via ScoreWorker(score_factory=...) so no API calls are made.
+    """
+    from alphagenome.models import dna_client
+    from scoring.composite import score_single_variant
+    model = dna_client.create(api_key)
+
+    def score(variant_input, tissue_profile):
+        return score_single_variant(model, variant_input, tissue_profile)
+    return score
+
+
+def _worker_main(api_key, score_factory, req_q, res_q):
     try:
-        from alphagenome.models import dna_client
-        from scoring.composite import score_single_variant
-        model = dna_client.create(api_key)
+        score = score_factory(api_key)
     except Exception as exc:
         try:
             res_q.put({"error": f"worker_init: {exc}"})
@@ -40,7 +53,7 @@ def _worker_main(api_key, req_q, res_q):
             return
         variant_input, tissue_profile = payload
         try:
-            res_q.put(score_single_variant(model, variant_input, tissue_profile))
+            res_q.put(score(variant_input, tissue_profile))
         except Exception as exc:
             res_q.put({"error": str(exc)})
 
@@ -53,8 +66,9 @@ class ScoreWorker:
     transparently re-spawned after a timeout.
     """
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, score_factory=_default_score_factory) -> None:
         self._api_key = api_key
+        self._score_factory = score_factory
         self._ctx = multiprocessing.get_context("spawn")
         self._proc = None
         self._req_q = None
@@ -66,7 +80,7 @@ class ScoreWorker:
         self._res_q = self._ctx.Queue()
         self._proc = self._ctx.Process(
             target=_worker_main,
-            args=(self._api_key, self._req_q, self._res_q),
+            args=(self._api_key, self._score_factory, self._req_q, self._res_q),
             daemon=True,
         )
         self._proc.start()
@@ -113,8 +127,10 @@ class ScoreWorkerPool:
     remains constant.
     """
 
-    def __init__(self, n_workers: int, api_key: str) -> None:
-        self._workers = [ScoreWorker(api_key) for _ in range(n_workers)]
+    def __init__(self, n_workers: int, api_key: str,
+                 score_factory=_default_score_factory) -> None:
+        self._workers = [ScoreWorker(api_key, score_factory=score_factory)
+                         for _ in range(n_workers)]
         self._available: _queue.Queue = _queue.Queue()
         for w in self._workers:
             self._available.put(w)
