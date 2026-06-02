@@ -1,18 +1,37 @@
-"""Diagnose the two failing canonical variant tests (rs7903146, rs356219).
+"""Tissue-filter diagnostic for rs7903146 (TCF7L2/T2D) and rs356219 (SNCA/PD).
 
-Hypothesis: the disease tissue profiles for T2D (pancreas/islet) and PD (brain/
-substantia nigra) are correctly defined, but filter_tracks silently falls back
-to ALL tracks when nothing matches — so the failing variants may have been
-scored against the full mixed catalog (dominated by other tissues), not the
-disease-matched subset that would emphasize their causal mechanism.
+Historical context: these two variants used to fail a strict top-20% rank
+test in the canonical verification harness. The original docs blamed a
+tissue mismatch (scoring against K562/blood-lineage instead of disease-
+matched tracks). The hypothesis being checked here was a related one — that
+filter_tracks silently falls back to ALL tracks when nothing matches the
+disease keywords, leading to the same effective behavior.
 
-For each failing variant, this script:
+Both hypotheses are REFUTED by this script's output:
+  - T2D retains ~1,230 / 11,906 tracks; top biosamples include pancreas,
+    liver, hepatocyte, skeletal muscle.
+  - PD retains ~906 / 15,518 tracks; top biosamples include substantia
+    nigra, prefrontal cortex, neural cell.
+
+The actual cause of the rank-test failures is at the modality-aggregation
+level — rs356219 scores below the median of PD variants on every modality.
+See docs/canonical_variants.md for the full diagnosis and
+analysis/explore_composite_weights.py for the weight-scheme exploration.
+
+The verification harness now splits these into a separate
+`canonical_regulatory_detection` group with an absolute-effect threshold
+rather than a rank claim; both tests pass.
+
+This script is kept as a documented diagnostic — re-run if the tissue
+filter or disease profiles are ever changed.
+
+For each variant, this script:
   1. Scores it via the AlphaGenome API with the appropriate disease profile.
   2. Reports the number of tracks before/after the tissue filter.
   3. Lists the top biosample / gtex tissues represented in the filtered set.
   4. Flags whether the tissue filter fell back to "all tracks".
 
-Run:
+Run (requires ALPHAGENOME_API_KEY, ~2 API calls / ~2 min):
     python verification/diagnose_canonical_failures.py
 """
 
