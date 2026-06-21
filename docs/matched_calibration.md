@@ -49,9 +49,10 @@ chr14..chr18 → 2 each, chr19..chr22 → 1 each.
 * Drop any variant whose rsID appears in `tewhey_mpra.parquet`. Three
   variants were dropped in the present run.
 
-The post-filter pool is **16,341** common autosomal SNVs. A deterministic
-seed-based subset of 6,000 is sent to the scoring stage so that overall
-runtime is bounded; the subset is reproducible from `seed` and `pool_cap`.
+A deterministic seed-based subset capped at **6,000** candidates
+(`config.yaml` → `matched_calibration.pool_cap`) is sent to the scoring
+stage so that overall runtime is bounded; the subset is reproducible from
+`seed` and `pool_cap`.
 
 ### 3. Score with the matched summary statistic
 
@@ -81,8 +82,9 @@ After scoring, all rows with non-null `raw_max_signed_delta` are written to
 `matched_calibration_null.parquet` and form the empirical null distribution
 used at test time.
 
-In the present run: **5,995 variants attempted, 5,943 successful, 52
-timeouts (0.87 %), 0 API errors → 5,941 clean rows in the null parquet.**
+In the committed run (`matched_calibration_cache.db`): **5,993 variants
+scored, 60 API timeouts dropped, 0 non-timeout errors → 5,933 clean rows in
+`matched_calibration_null.parquet`.**
 
 ### 5. Apply at test time
 
@@ -114,7 +116,7 @@ identical to any internal phred convention DeepMind may use.
 
 ## The smoking-gun comparison
 
-On the **same** 5,941 random common autosomal variants, two scores are
+On the **same** 5,933 random common autosomal variants, two scores are
 computed:
 
 * `raw_max_signed_delta` — the matched (max-over-tracks) raw delta. Its
@@ -124,7 +126,7 @@ computed:
 
 | | Matched null (raw max-over-tracks Δ) | Published single-track quantile (peak track) |
 |---|---|---|
-| Saturation `|score| > 0.9` | **0.42 %** | **41.3 %** |
+| Saturation `|score| > 0.9` | **0.42 %** | **41.4 %** |
 | Exact ceiling `≈ ±1` | 0.000 % | 1.1 % |
 | Shape | Sharp spike at 0, heavy tails (kurtosis 81.8) | U-shape pushed against ±1 |
 | Mean / median / std | +0.004 / +0.009 / 0.131 | (saturated; descriptive stats not informative) |

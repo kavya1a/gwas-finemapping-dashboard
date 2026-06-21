@@ -93,17 +93,17 @@ The distribution comparison makes the issue concrete. Original-quantile scores p
 
 ![Correlation by LFC bin](figures/phase2_lfc_bins.png)
 
-Breaking down by effect size shows where each predictor succeeds. Among variants with large measured effects (|LFC| > 0.5), raw deltas reach ρ = +0.614; the original-quantile score gets to +0.245. In the low-effect bins where most variants sit, the original quantile is near zero or negative, while raw deltas stay modestly positive.
+Breaking down by effect size (full panel) shows where each predictor succeeds. Among variants with large measured effects (|LFC| > 0.5), raw deltas reach ρ = +0.451; the original-quantile score gets to +0.245. In the low-effect bins where most variants sit, the original quantile is near zero or negative, while raw deltas stay modestly positive.
 
 | \|LFC\| bin | Original quantile ρ | n | Raw / matched ρ | n |
 |---|---|---|---|---|
-| 0 – 0.05 | −0.015 | 1,512 | +0.092 | 281 |
-| 0.05 – 0.10 | −0.000 | 892 | +0.099 | 168 |
-| 0.10 – 0.20 | +0.044 | 553 | +0.383 | 93 |
-| 0.20 – 0.50 | +0.185 | 242 | +0.031 | 43 |
-| > 0.50 | +0.245 | 60 | **+0.614** | 15 |
+| 0 – 0.05 | −0.015 | 1,512 | +0.076 | 1,516 |
+| 0.05 – 0.10 | −0.000 | 892 | +0.108 | 897 |
+| 0.10 – 0.20 | +0.044 | 553 | +0.134 | 558 |
+| 0.20 – 0.50 | +0.185 | 242 | +0.240 | 244 |
+| > 0.50 | +0.245 | 60 | **+0.451** | 60 |
 
-The non-monotone pattern in the raw/matched column at the 0.20–0.50 bin reflects small-sample noise (n = 43); bins below 0.10 and the > 0.50 bin are the more stable estimates.
+The raw/matched column rises monotonically with measured effect size — from ρ = +0.076 in the smallest-effect bin to +0.451 among the largest-effect variants — so the predictor does most of its work exactly where the MPRA signal is strongest. The original quantile stays near zero or negative until the top two bins. (The two columns use slightly different denominators: the original quantile is defined wherever `expression_subscore` is present, n = 3,259; the raw/matched delta wherever `max_signed_raw` is present, n = 3,275.)
 
 Saturation is not specific to Tewhey's MPRA design or to neurological/metabolic disease GWAS. Platelet count GWAS variants (n = 198) saturate at 99.0%; hemoglobin GWAS variants (n = 195) at 100%. Different biology, different paradigm, consistent with the calibration-statistic mismatch documented above:
 
@@ -150,7 +150,7 @@ flowchart LR
 
 ### Matched-statistic calibration
 
-**5,933** random common autosomal SNVs (5,995 attempted, 60 errors, 2 timeouts) were sampled from **66 windows of 50 kb** placed proportional to chromosome length (chr1 → 7 windows; chr19–22 → 1 each), at uniformly-random offsets ≥ 1 Mb from chromosome ends, autosomes only, seed = 2026. Sex chromosomes were excluded for simplicity. Within each window, variants were fetched and filtered to MAF > 0.01 via gnomAD v3 GraphQL (the same allele-frequency source AlphaGenome calibrates against), keeping biallelic SNVs only and dropping any variant whose rsID appears in the Tewhey panel (3 dropped). The procedure is reproducible from the seed alone.
+**5,933** clean common autosomal SNVs (5,993 scored, 60 API timeouts dropped) were sampled from **66 windows of 50 kb** placed proportional to chromosome length (chr1 → 7 windows; chr19–22 → 1 each), at uniformly-random offsets ≥ 1 Mb from chromosome ends, autosomes only, seed = 2026. Sex chromosomes were excluded for simplicity. Within each window, variants were fetched and filtered to MAF > 0.01 via gnomAD v3 GraphQL (the same allele-frequency source AlphaGenome calibrates against), keeping biallelic SNVs only and dropping any variant whose rsID appears in the Tewhey panel (3 dropped). The procedure is reproducible from the seed alone.
 
 Each variant was scored through AlphaGenome v0.6.1 with the K562/blood-lineage tissue profile, expression-modality filter (RNA_SEQ + CAGE + PROCAP), and the same per-variant 60-second timeout used by `batch_score.py`. Scoring was parallelized 4-way with a write lock around the SQLite cache. Three summary statistics are retained per variant: the max, mean, and median signed `raw_score` across all K562 expression tracks. The peak track's published `quantile_score` is also retained for the saturation comparison.
 

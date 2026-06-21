@@ -6,7 +6,7 @@ Every parquet / SQLite file committed to the repo, column by column. All artifac
 
 ## `matched_calibration_cache.db` → table `scores`
 
-Per-variant K562 expression summary statistics for the 5,993 random common autosomal SNVs used as the matched-calibration null. 5,933 rows have a clean (error-free) score after 60 errors and 2 timeouts.
+Per-variant K562 expression summary statistics for the 5,993 random common autosomal SNVs scored for the matched-calibration null. 5,933 rows have a clean (error-free) score; the other 60 are API timeouts (dropped from the null).
 
 | Column | Type | Description |
 |---|---|---|
