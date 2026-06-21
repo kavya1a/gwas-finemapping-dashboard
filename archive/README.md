@@ -1,8 +1,8 @@
 # Archive
 
-Files moved here when the project pivoted to Path 2 (saturation finding) per PROJECT_LOCK.md.
+Files moved here when the project pivoted to the calibration-statistic / matched-recalibration finding.
 
-These are not deleted — they represent earlier work that is outside the locked scope.
+**Nothing in this directory is part of the current result or the `make reproduce` path.** It is pre-pivot work, kept for provenance only — earlier scripts, superseded write-ups (e.g. `TEWHEY_RESULT.md`, the raw-delta-primary framing; `OVERNIGHT_BLOCKERS.md`, a historical run-log), and the old random-variant control (superseded by the matched-statistic null in the main repo). Numbers in these files reflect earlier runs and are not maintained against the committed caches.
 
 | File / Dir | What it was | Why cut |
 |---|---|---|
