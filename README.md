@@ -324,6 +324,13 @@ The interpretation here rests on a specific causal story. The order-statistic pr
 - **Median or mean aggregation across tracks (DONE).** Replacing max with mean or median on the same K562 raw deltas drops common-variant saturation from 0.42% (max) to 0.00% (mean, median) on identical variants — confirming the order-statistic mechanism. Under the matched-calibration recipe, all three aggregations give essentially identical Tewhey rankings (Spearman ρ within each other's CIs; ~13% saturation under matched quantile regardless of aggregation). The order-statistic effect is real on the null distribution; the residual Tewhey saturation under matched calibration is regulatory enrichment, not an aggregation artifact. See the three-recipe comparison in `analyze_matched_calibration_recipes.py` and `figures/matched_recipes_comparison.png`.
 - **Matched-tissue scoring (NOT RUN).** Re-running raw delta extraction with LCL (lymphoblastoid) tracks instead of K562 should bring the model into the cell type Tewhey 2016 actually measured. If the K562/LCL mismatch is suppressing correlation, matched-tissue ρ should rise. If it stays flat or falls, ρ = +0.123 reflects the model's true ceiling on this dataset rather than a tissue artifact, and the story needs revising.
 
+### Next experiments
+
+Two further checks are **scaffolded but not yet run**. Each is a runnable script with a `make` target that fails loudly if its required inputs are absent and never emits placeholder numbers — so nothing below is a result, only a stated plan.
+
+- **DNase/ATAC re-calibration** — `make dnase-atac` (`dnase_atac_recalibration.py`). Mirror the expression matched-calibration pipeline exactly, but score under DNase/ATAC accessibility output types. AlphaGenome exposes far fewer accessibility tracks than expression tracks, and the order-statistic inflation grows with track count (1 − (1 − p)ⁿ), so the *unmatched* accessibility max should already saturate less than expression's 41.4% on the common-variant null. The script builds the same matched-vs-unmatched saturation comparison on accessibility tracks. Requires an API key (no accessibility cache is committed).
+- **Phred-scale check** — `make phred-check` (`phred_scale_check.py`). If a newer SDK ships phred-scale quantile values, compare them against (a) the single-track phred transform and (b) the matched-recalibration phred (`phred_empirical`), both computed from committed data, to determine which the SDK's shipped values actually correspond to. AlphaGenome v0.6.1 ships no phred output, so the script fails loud unless phred values are supplied via `--sdk-phred-csv`.
+
 ---
 
 ## Citation

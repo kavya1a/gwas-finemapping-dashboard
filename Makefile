@@ -1,6 +1,7 @@
 .PHONY: install reproduce figures saturation distribution blood hero \
         matched-figures analysis test verify \
-        raw-full matched_calibration pipeline help
+        raw-full matched_calibration pipeline \
+        dnase-atac phred-check help
 
 PYTHON := python3.11
 
@@ -20,6 +21,10 @@ help:
 	@echo "  raw-full             Score the full Tewhey panel from scratch (~8 hrs)"
 	@echo "  matched_calibration  Build the matched null from scratch + Tewhey re-analysis (~70 min)"
 	@echo "  pipeline             Full from-scratch GWAS + Tewhey pipeline (~20 hrs)"
+	@echo ""
+	@echo "Author-suggested next experiments (scaffolded, NOT yet run; fail loud without inputs):"
+	@echo "  dnase-atac           Matched re-calibration under DNase/ATAC tracks"
+	@echo "  phred-check          Compare SDK phred values vs single-track / matched transforms"
 
 install:
 	pip install -r requirements.txt
@@ -98,3 +103,16 @@ scored_variants.db: preloaded_variants.db
 
 figures/tewhey_raw_delta_full_results.png: tewhey_mpra.parquet
 	$(PYTHON) extract_raw_deltas.py --full
+
+# ════════════════════════════════════════════════════════════════════════════
+#  AUTHOR-SUGGESTED NEXT EXPERIMENTS — scaffolded, not yet run.
+#  Both fail loudly with an explanatory error if their required inputs are
+#  absent (API key / a newer SDK's phred values). They never emit simulated
+#  numbers. See the README "Next experiments" subsection.
+# ════════════════════════════════════════════════════════════════════════════
+
+dnase-atac:
+	$(PYTHON) dnase_atac_recalibration.py
+
+phred-check:
+	$(PYTHON) phred_scale_check.py
