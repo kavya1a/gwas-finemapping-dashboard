@@ -1,4 +1,4 @@
-name: reproduce-figures
+name: reproduce
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   reproduce-from-cache:
-    name: Regenerate figures from cached data (no API key)
+    name: Reproduce figures + headline numbers from cached data (no API key)
     runs-on: ubuntu-latest
 
     steps:
@@ -22,42 +22,28 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Install pinned dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install nbformat nbconvert ipykernel
 
-      - name: Run unit tests
-        run: |
-          python -m pytest tests/ -q
+      # Regenerates every figure + every CSV table from the committed cache, then
+      # runs tests/ (unit + the numeric smoke suite that re-derives each headline
+      # number and checks it against the README). No API key, deterministic.
+      - name: make reproduce
+        run: make reproduce PYTHON=python
 
-      - name: Regenerate figures from cache
-        run: |
-          make figures
-
-      - name: Three-recipe matched-calibration analysis
-        run: |
-          python analyze_matched_calibration_recipes.py
-
-      - name: Mean-aggregation raw-side probe
-        run: |
-          python analyze_mean_aggregation.py
-
-      - name: Hero figure
-        run: |
-          python make_hero_figure.py
+      # Canonical variant tests are a hard gate: all 5 must pass under the
+      # rank-recovery / regulatory-detection split (see docs/canonical_variants.md).
+      - name: Canonical variant tests (5/5 required)
+        run: make verify PYTHON=python
 
       - name: Execute reproduction notebook end-to-end
         run: |
           jupyter nbconvert --to notebook --execute \
                             --output reproduce.executed.ipynb \
                             notebooks/reproduce.ipynb
-
-      - name: Canonical variant tests (3/5 expected to pass — see docs/canonical_variants.md)
-        continue-on-error: true
-        run: |
-          make verify
 
       - name: Upload regenerated figures as artifact
         uses: actions/upload-artifact@v4

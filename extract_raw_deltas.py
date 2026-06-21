@@ -367,11 +367,14 @@ def main() -> None:
                         help="Score all Tewhey variants (not just stratified 600)")
     parser.add_argument("--limit", type=int, default=None,
                         help="Cap API calls to N uncached variants (smoke-test mode)")
+    parser.add_argument("--from-cache", action="store_true",
+                        help="Regenerate the figure from tewhey_raw_delta_cache.db with no "
+                             "API calls (does not rewrite the report).")
     args = parser.parse_args()
 
     api_key = os.environ.get("ALPHAGENOME_API_KEY", "")
-    if not api_key:
-        print("ERROR: ALPHAGENOME_API_KEY not set")
+    if not api_key and not args.from_cache:
+        print("ERROR: ALPHAGENOME_API_KEY not set (or pass --from-cache to replot from cache)")
         sys.exit(1)
 
     df = pd.read_parquet(PARQUET)
@@ -389,6 +392,8 @@ def main() -> None:
     _init_cache()
     cache = _load_cache()
     to_score = [row for _, row in sample.iterrows() if row.rsid not in cache]
+    if args.from_cache:
+        to_score = []  # cache-only replot: never hit the API
     if args.limit is not None:
         to_score = to_score[:args.limit]
     print(f"  {len(cache)} cached, {len(to_score)} to score (~{len(to_score)*2//60} min at 2s/variant)")
@@ -493,13 +498,16 @@ def main() -> None:
     _make_scatter(best, out_fig, mode=mode)
 
     # ── Report ───────────────────────────────────────────────────────────────
-    corrs = {
-        "max_signed_raw":  c_max,
-        "mean_signed_raw": c_mean,
-        "quant_signed":    c_quant,
-        "mag_abs":         c_mag,
-    }
-    _write_report(corrs, n_scored, mode=mode)
+    # The markdown report reflects the pre-matched-cal raw-delta framing; only
+    # (re)write it during a real API scoring run, never on a cache-only replot.
+    if not args.from_cache:
+        corrs = {
+            "max_signed_raw":  c_max,
+            "mean_signed_raw": c_mean,
+            "quant_signed":    c_quant,
+            "mag_abs":         c_mag,
+        }
+        _write_report(corrs, n_scored, mode=mode)
 
     print("\nAll done.")
 

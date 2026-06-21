@@ -29,11 +29,10 @@ Locally:
 git clone https://github.com/kavya1a/regulatory-score-saturation.git
 cd regulatory-score-saturation
 pip install -r requirements.txt
-make figures                                    # regenerate all figures from cached data
-python analyze_matched_calibration_recipes.py   # three-recipe comparison from scratch
+make reproduce            # regenerate every figure + every README number from cache, then verify them
 ```
 
-No AlphaGenome API key needed — all scoring outputs are cached in the repo. See [Setup](#setup) for the full path including re-scoring through the API.
+`make reproduce` regenerates all figures and the matched-calibration / three-recipe / LFC-bin CSV tables from the committed cache, then runs the smoke suite (`tests/test_reproduce_numbers.py`) that re-derives every headline number and checks it against the values quoted here. It is deterministic — window sampling is seeded at 2026, every bootstrap CI at 42 — and needs no AlphaGenome API key. See [Setup](#setup) for the full from-scratch path through the API.
 
 ---
 
@@ -214,11 +213,13 @@ cp .env.example .env
 # add ALPHAGENOME_API_KEY to .env
 ```
 
-To regenerate all figures from cached data (about a minute, no API key needed):
+To regenerate every figure and every README number from cached data and verify them (about a minute, no API key needed):
 
 ```bash
-make figures
+make reproduce
 ```
+
+(The `cp .env.example .env` step above is only needed for the from-scratch API paths below — `make reproduce` ignores it.)
 
 To run the matched-calibration build + Tewhey re-analysis end-to-end (~70 minutes of API time, 4-way parallel):
 
@@ -232,7 +233,7 @@ Full pipeline from scratch — fetch, score GWAS, score Tewhey, raw-delta extrac
 
 ```bash
 make pipeline
-make figures
+make reproduce
 make verify
 ```
 
@@ -244,29 +245,37 @@ make verify
 
 ```
 ├── README.md
+├── Makefile                     # `make reproduce` (cache-only) + from-scratch API targets
 ├── config.yaml                  # tissue profiles, canonical variants, matched_calibration block
 │
+│  # ── From-scratch scoring (AlphaGenome API key required) ──
 ├── prefetch_variants.py         # GWAS Catalog → preloaded_variants.db
 ├── batch_score.py               # score GWAS variants → scored_variants.db
-├── extract_raw_deltas.py        # raw expression delta extraction (Tewhey)
-├── build_matched_calibration.py # Component 2: build matched null on common variants (max/mean/median)
-├── analyze_matched_calibration.py         # Component 3: 4-way Tewhey re-analysis
-├── analyze_matched_calibration_recipes.py # Component 4: three-recipe matched-cal comparison
-├── analyze_mean_aggregation.py            # raw-side max vs mean on Tewhey
+├── extract_raw_deltas.py        # raw expression delta extraction (Tewhey); --from-cache to replot
+├── build_matched_calibration.py # build matched null on common variants (max/mean/median); --post rebuilds from cache
+│
+│  # ── Analysis + figures (cache-only, no API) ──
+├── analyze_matched_calibration.py         # 4-way Tewhey re-analysis → matched_calibration_comparison.csv
+├── analyze_matched_calibration_recipes.py # three-recipe matched-cal comparison → matched_recipes_comparison.csv
+├── analyze_mean_aggregation.py            # raw-side max vs mean on Tewhey → mean_aggregation_comparison.csv
 ├── saturation_figure.py         # saturation CDF figures
-├── phase2_figures.py            # distribution and LFC-bin figures
-├── phase3_blood_traits.py       # blood trait replication
+├── distribution_figures.py      # distribution + LFC-bin figures → lfc_bin_comparison.csv
+├── blood_trait_replication.py   # blood trait replication (--from-cache)
 ├── make_hero_figure.py          # README hero figure
 ├── gwas_catalog.py              # GWAS Catalog v2 client
 ├── allele_resolver.py           # Ensembl allele resolution + cache
 │
+│  # ── Author-suggested extensions (scaffolded, not yet run) ──
+├── dnase_atac_recalibration.py  # matched re-cal under DNase/ATAC tracks (fail-loud TODO)
+├── phred_scale_check.py         # compare SDK phred values vs local transforms (fail-loud TODO)
+│
 ├── scoring/                     # AlphaGenome scoring utilities
 ├── verification/                # canonical variant test harness
-├── tests/                       # unit tests
+├── tests/                       # unit + numeric smoke suite (test_reproduce_numbers.py)
 ├── notebooks/                   # Colab-runnable reproduction notebook
 ├── figures/                     # all generated figures
 ├── docs/                        # methodology + canonical variants + data dictionary
-└── archive/                     # pre-pivot scripts and superseded artifacts
+└── archive/                     # pre-pivot scripts and superseded artifacts (not part of the result)
 ```
 
 All scoring results are included so you can inspect the data or regenerate figures without API access:

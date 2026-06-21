@@ -1,12 +1,13 @@
-"""Phase 2 figures — Demonstrating the fix.
+"""Distribution + LFC-bin figures — demonstrating the fix.
 
-Produces:
+Produces (all from committed cache, no API):
   figures/phase2_distribution.png   — raw delta vs normalized score distributions
   figures/phase2_lfc_bins.png       — Spearman correlation by |LFC| bin, raw vs normalized
   figures/phase2_combined.png       — 3-panel combined figure for README
+  lfc_bin_comparison.csv            — the |LFC|-bin Spearman table shown in the README
 
 Run:
-    python phase2_figures.py
+    python distribution_figures.py
 """
 
 from __future__ import annotations
@@ -153,7 +154,7 @@ def make_lfc_bin_fig(full_df: pd.DataFrame, sample: pd.DataFrame) -> None:
     lfc_n  = full_df.loc[valid_n, "mpra_lfc"].to_numpy(float)
     scr_n  = full_df.loc[valid_n, "expression_subscore"].to_numpy(float)
 
-    # Raw: 600-variant stratified sample
+    # Raw: full-panel cache (every variant with a cached max_signed_raw)
     lfc_r  = sample["mpra_lfc"].to_numpy(float)
     scr_r  = sample["max_signed_raw"].to_numpy(float)
 
@@ -167,6 +168,16 @@ def make_lfc_bin_fig(full_df: pd.DataFrame, sample: pd.DataFrame) -> None:
         rn = f"{bn['r']:+.3f}" if bn['r'] is not None else "  —  "
         rr = f"{br['r']:+.3f}" if br['r'] is not None else "  —  "
         print(f"{BIN_LABELS[bins_norm.index(bn)]:<12} {rn:>8} {bn['n']:>8} {rr:>8} {br['n']:>8}")
+
+    # Pin the README table to a committed CSV (consumed by tests/test_reproduce_numbers.py)
+    csv_path = DIR / "lfc_bin_comparison.csv"
+    pd.DataFrame([
+        {"lfc_bin": BIN_LABELS[i],
+         "orig_quantile_r": bins_norm[i]["r"], "orig_quantile_n": bins_norm[i]["n"],
+         "raw_matched_r":   bins_raw[i]["r"],  "raw_matched_n":  bins_raw[i]["n"]}
+        for i in range(len(BIN_LABELS))
+    ]).to_csv(csv_path, index=False)
+    print(f"LFC-bin table → {csv_path}")
 
     x = np.arange(len(BIN_LABELS))
     width = 0.35

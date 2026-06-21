@@ -23,3 +23,7 @@ whole_genome_SNVs.tsv.gz
 
 # Session-spanning working notes (private, not part of the public narrative)
 context.md
+.wrapup/
+
+# Reproduction-run notebook output
+notebooks/reproduce.executed.ipynb
