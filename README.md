@@ -315,12 +315,6 @@ The interpretation here rests on a specific causal story. The order-statistic pr
 
 ---
 
-## Acknowledgments
-
-This analysis was substantially sharpened by feedback from Žiga Avsec (Google DeepMind), who reviewed an earlier version and identified that the published quantile calibration uses single-track summary statistics. The matched-statistic experiment in this work followed directly from that observation.
-
----
-
 ## Citation
 
 ```bibtex

@@ -126,5 +126,5 @@ Ensembl REST API cache for allele resolution. Used by all scoring scripts to can
 ## Reproducibility notes
 
 - Window-sampling RNG seed is **`2026`** (see `config.yaml` → `matched_calibration.seed`). The 66 windows, the 6,000-variant pool cap, and the gnomAD region fetches are all deterministic from this seed.
-- AlphaGenome SDK version pinned to **v0.6.1**. Newer SDK versions may expose different track sets (the `phred_empirical` scale Avsec mentioned in private correspondence appears in later releases).
+- AlphaGenome SDK version pinned to **v0.6.1**. Newer SDK versions may expose different track sets. The `phred_empirical` scale used here is derived locally from the matched null (see `docs/matched_calibration.md`); a grep across SDK source, all ten tagged releases, the issue tracker, the docs, and the Nature supplement found no phred-scaled output in v0.6.1.
 - The K562 tissue profile (`config.yaml` → `tissue_profiles.tewhey_k562`) is a keyword filter; per-variant track counts vary 16 → 3,178 depending on which biosample tags AlphaGenome returns.
