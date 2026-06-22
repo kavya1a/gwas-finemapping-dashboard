@@ -4,18 +4,16 @@ title: "Calibration-statistic mismatch in AlphaGenome variant scoring"
 authors:
   - family-names: "Amrutham"
     given-names: "Kavya"
-    affiliation: "Barnard College, Columbia University"
-    email: "ka3041@barnard.edu"
 date-released: 2026-04-27
 url: "https://github.com/kavya1a/regulatory-score-saturation"
 abstract: >
   AlphaGenome's published quantile calibration is built on single-track
   summary statistics. When max-over-tracks aggregation is composed on top of
   these outputs, saturation collapses correlation against measured MPRA log
-  fold change from rho = 0.123 to rho = 0.037 (Tewhey 2016, n = 3,246). We
+  fold change from rho = 0.122 to rho = 0.037 (Tewhey 2016, n = 3,246). We
   re-derive the quantile calibration on a max-over-tracks common-variant null
-  (5,941 random gnomAD MAF>0.01 SNVs) and show the full underlying signal is
-  recovered at rho = 0.123 (95% CI [0.088, 0.157], p = 2.5e-12). The
+  (5,933 random gnomAD MAF>0.01 SNVs) and show the full underlying signal is
+  recovered at rho = 0.122 (95% CI [0.088, 0.157], p = 2.5e-12). The
   saturation is an artifact of the calibration-statistic mismatch, not of
   the model.
 keywords:
