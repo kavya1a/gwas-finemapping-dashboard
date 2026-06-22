@@ -24,7 +24,7 @@ CELLS = [
 This notebook regenerates the headline result from cached data:
 
 - The published quantile saturates 94.9% of Tewhey variants above |0.9|
-- Re-quantiling against a matched-statistic common-variant null recovers ρ = +0.123 (p = 2.5×10⁻¹²) on the same variants
+- Re-quantiling against a matched-statistic common-variant null recovers ρ = +0.122 (p = 2.5×10⁻¹²) on the same variants
 - The order-statistic mechanism is real on the null (max: 0.42% saturated; mean/median: 0.00%)
 
 No AlphaGenome API key required — all scoring outputs are cached in the repo. Total runtime: ~15 seconds.
@@ -140,7 +140,7 @@ print(f"Variants with all predictors valid: {len(valid):,}")
     new_markdown_cell("""\
 ## 4. Spearman vs measured MPRA LFC — published vs matched
 
-The headline recovery. ρ jumps from +0.037 to +0.123 (p = 2.5×10⁻¹²) on the same 3,246 variants.
+The headline recovery. ρ jumps from +0.037 to +0.122 (p = 2.5×10⁻¹²) on the same 3,246 variants.
 """),
 
     new_code_cell("""\
@@ -253,7 +253,7 @@ print("The matched-calibration recipe absorbs the choice of aggregation.")
 | Step | What we did | What we learned |
 |---|---|---|
 | 2 | Counted saturation in the published quantile | 94.9% of Tewhey above \\|0.9\\| |
-| 4 | Re-quantiled against matched null | ρ jumps from +0.037 to +0.123 (p = 2.5×10⁻¹²) |
+| 4 | Re-quantiled against matched null | ρ jumps from +0.037 to +0.122 (p = 2.5×10⁻¹²) |
 | 6 | Compared max / mean / median nulls on common variants | Order-statistic mechanism: max 0.42%, mean & median 0.00% |
 | 7 | Swapped max for mean in the matched recipe | CIs overlap; ρ within tolerance; aggregation choice doesn't matter once matched calibration is in place |
 

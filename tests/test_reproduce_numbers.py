@@ -76,7 +76,7 @@ def test_matched_null_saturation(null_df):
     assert np.mean(np.abs(q) > 0.9) * 100 == pytest.approx(41.4, abs=PCT_TOL)
 
 
-# ── Tewhey headline: ρ 0.037 → 0.123, n = 3,246 ───────────────────────────────
+# ── Tewhey headline: ρ 0.037 → 0.122 (0.1225 at 4dp), n = 3,246 ───────────────
 
 def test_tewhey_spearman_headline(null_df, tewhey):
     null_sorted = np.sort(null_df["raw_max_signed_delta"].dropna().to_numpy(float))
