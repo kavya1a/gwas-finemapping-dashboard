@@ -18,8 +18,16 @@ whole_genome_SNVs.tsv.gz
 # Run logs (artifacts, not part of the analysis)
 *.log
 
+# Error log written by the from-scratch API pipeline (operational only; the
+# historical copy lives in archive/). Never ship a root blockers doc.
+/OVERNIGHT_BLOCKERS.md
+
 # Claude memory (project-local)
 .claude/
 
 # Session-spanning working notes (private, not part of the public narrative)
 context.md
+.wrapup/
+
+# Reproduction-run notebook output
+notebooks/reproduce.executed.ipynb

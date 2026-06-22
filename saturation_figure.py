@@ -6,7 +6,7 @@ AlphaGenome scores saturate on regulatory-enriched variant sets.
 Three distributions plotted for each of three modalities
 (expression, chromatin, tf_binding):
   (a) Tewhey 2016 MPRA variants (GWAS regulatory loci, n~3259)
-  (b) Disease GWAS variants from scored_variants.db (n~363 pairs)
+  (b) Disease GWAS variants from scored_variants.db (n=767 expression pairs)
   (c) Uniform reference — the theoretical distribution for random
       common variants by construction of the AlphaGenome quantile
       calibration (~300K gnomAD common variants define the background;

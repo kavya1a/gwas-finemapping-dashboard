@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![reproduce-figures](https://github.com/kavya1a/regulatory-score-saturation/actions/workflows/ci.yml/badge.svg)](https://github.com/kavya1a/regulatory-score-saturation/actions/workflows/ci.yml)
+[![reproduce](https://github.com/kavya1a/regulatory-score-saturation/actions/workflows/ci.yml/badge.svg)](https://github.com/kavya1a/regulatory-score-saturation/actions/workflows/ci.yml)
 
 ![Hero recovery](figures/hero_recovery.png)
 
@@ -29,11 +29,10 @@ Locally:
 git clone https://github.com/kavya1a/regulatory-score-saturation.git
 cd regulatory-score-saturation
 pip install -r requirements.txt
-make figures                                    # regenerate all figures from cached data
-python analyze_matched_calibration_recipes.py   # three-recipe comparison from scratch
+make reproduce            # regenerate every figure + every README number from cache, then verify them
 ```
 
-No AlphaGenome API key needed — all scoring outputs are cached in the repo. See [Setup](#setup) for the full path including re-scoring through the API.
+`make reproduce` regenerates all figures and the matched-calibration / three-recipe / LFC-bin CSV tables from the committed cache, then runs the smoke suite (`tests/test_reproduce_numbers.py`) that re-derives every headline number and checks it against the values quoted here. It is deterministic — window sampling is seeded at 2026, every bootstrap CI at 42 — and needs no AlphaGenome API key. See [Setup](#setup) for the full from-scratch path through the API.
 
 ---
 
@@ -93,17 +92,17 @@ The distribution comparison makes the issue concrete. Original-quantile scores p
 
 ![Correlation by LFC bin](figures/phase2_lfc_bins.png)
 
-Breaking down by effect size shows where each predictor succeeds. Among variants with large measured effects (|LFC| > 0.5), raw deltas reach ρ = +0.614; the original-quantile score gets to +0.245. In the low-effect bins where most variants sit, the original quantile is near zero or negative, while raw deltas stay modestly positive.
+Breaking down by effect size (full panel) shows where each predictor succeeds. Among variants with large measured effects (|LFC| > 0.5), raw deltas reach ρ = +0.451; the original-quantile score gets to +0.245. In the low-effect bins where most variants sit, the original quantile is near zero or negative, while raw deltas stay modestly positive.
 
 | \|LFC\| bin | Original quantile ρ | n | Raw / matched ρ | n |
 |---|---|---|---|---|
-| 0 – 0.05 | −0.015 | 1,512 | +0.092 | 281 |
-| 0.05 – 0.10 | −0.000 | 892 | +0.099 | 168 |
-| 0.10 – 0.20 | +0.044 | 553 | +0.383 | 93 |
-| 0.20 – 0.50 | +0.185 | 242 | +0.031 | 43 |
-| > 0.50 | +0.245 | 60 | **+0.614** | 15 |
+| 0 – 0.05 | −0.015 | 1,512 | +0.076 | 1,516 |
+| 0.05 – 0.10 | −0.000 | 892 | +0.108 | 897 |
+| 0.10 – 0.20 | +0.044 | 553 | +0.134 | 558 |
+| 0.20 – 0.50 | +0.185 | 242 | +0.240 | 244 |
+| > 0.50 | +0.245 | 60 | **+0.451** | 60 |
 
-The non-monotone pattern in the raw/matched column at the 0.20–0.50 bin reflects small-sample noise (n = 43); bins below 0.10 and the > 0.50 bin are the more stable estimates.
+The raw/matched column rises monotonically with measured effect size — from ρ = +0.076 in the smallest-effect bin to +0.451 among the largest-effect variants — so the predictor does most of its work exactly where the MPRA signal is strongest. The original quantile stays near zero or negative until the top two bins. (The two columns use slightly different denominators: the original quantile is defined wherever `expression_subscore` is present, n = 3,259; the raw/matched delta wherever `max_signed_raw` is present, n = 3,275.)
 
 Saturation is not specific to Tewhey's MPRA design or to neurological/metabolic disease GWAS. Platelet count GWAS variants (n = 198) saturate at 99.0%; hemoglobin GWAS variants (n = 195) at 100%. Different biology, different paradigm, consistent with the calibration-statistic mismatch documented above:
 
@@ -150,7 +149,7 @@ flowchart LR
 
 ### Matched-statistic calibration
 
-**5,933** random common autosomal SNVs (5,995 attempted, 60 errors, 2 timeouts) were sampled from **66 windows of 50 kb** placed proportional to chromosome length (chr1 → 7 windows; chr19–22 → 1 each), at uniformly-random offsets ≥ 1 Mb from chromosome ends, autosomes only, seed = 2026. Sex chromosomes were excluded for simplicity. Within each window, variants were fetched and filtered to MAF > 0.01 via gnomAD v3 GraphQL (the same allele-frequency source AlphaGenome calibrates against), keeping biallelic SNVs only and dropping any variant whose rsID appears in the Tewhey panel (3 dropped). The procedure is reproducible from the seed alone.
+**5,933** clean common autosomal SNVs (5,993 scored, 60 API timeouts dropped) were sampled from **66 windows of 50 kb** placed proportional to chromosome length (chr1 → 7 windows; chr19–22 → 1 each), at uniformly-random offsets ≥ 1 Mb from chromosome ends, autosomes only, seed = 2026. Sex chromosomes were excluded for simplicity. Within each window, variants were fetched and filtered to MAF > 0.01 via gnomAD v3 GraphQL (the same allele-frequency source AlphaGenome calibrates against), keeping biallelic SNVs only and dropping any variant whose rsID appears in the Tewhey panel (3 dropped). The procedure is reproducible from the seed alone.
 
 Each variant was scored through AlphaGenome v0.6.1 with the K562/blood-lineage tissue profile, expression-modality filter (RNA_SEQ + CAGE + PROCAP), and the same per-variant 60-second timeout used by `batch_score.py`. Scoring was parallelized 4-way with a write lock around the SQLite cache. Three summary statistics are retained per variant: the max, mean, and median signed `raw_score` across all K562 expression tracks. The peak track's published `quantile_score` is also retained for the saturation comparison.
 
@@ -214,11 +213,13 @@ cp .env.example .env
 # add ALPHAGENOME_API_KEY to .env
 ```
 
-To regenerate all figures from cached data (about a minute, no API key needed):
+To regenerate every figure and every README number from cached data and verify them (about a minute, no API key needed):
 
 ```bash
-make figures
+make reproduce
 ```
+
+(The `cp .env.example .env` step above is only needed for the from-scratch API paths below — `make reproduce` ignores it.)
 
 To run the matched-calibration build + Tewhey re-analysis end-to-end (~70 minutes of API time, 4-way parallel):
 
@@ -232,7 +233,7 @@ Full pipeline from scratch — fetch, score GWAS, score Tewhey, raw-delta extrac
 
 ```bash
 make pipeline
-make figures
+make reproduce
 make verify
 ```
 
@@ -244,29 +245,37 @@ make verify
 
 ```
 ├── README.md
+├── Makefile                     # `make reproduce` (cache-only) + from-scratch API targets
 ├── config.yaml                  # tissue profiles, canonical variants, matched_calibration block
 │
+│  # ── From-scratch scoring (AlphaGenome API key required) ──
 ├── prefetch_variants.py         # GWAS Catalog → preloaded_variants.db
 ├── batch_score.py               # score GWAS variants → scored_variants.db
-├── extract_raw_deltas.py        # raw expression delta extraction (Tewhey)
-├── build_matched_calibration.py # Component 2: build matched null on common variants (max/mean/median)
-├── analyze_matched_calibration.py         # Component 3: 4-way Tewhey re-analysis
-├── analyze_matched_calibration_recipes.py # Component 4: three-recipe matched-cal comparison
-├── analyze_mean_aggregation.py            # raw-side max vs mean on Tewhey
+├── extract_raw_deltas.py        # raw expression delta extraction (Tewhey); --from-cache to replot
+├── build_matched_calibration.py # build matched null on common variants (max/mean/median); --post rebuilds from cache
+│
+│  # ── Analysis + figures (cache-only, no API) ──
+├── analyze_matched_calibration.py         # 4-way Tewhey re-analysis → matched_calibration_comparison.csv
+├── analyze_matched_calibration_recipes.py # three-recipe matched-cal comparison → matched_recipes_comparison.csv
+├── analyze_mean_aggregation.py            # raw-side max vs mean on Tewhey → mean_aggregation_comparison.csv
 ├── saturation_figure.py         # saturation CDF figures
-├── phase2_figures.py            # distribution and LFC-bin figures
-├── phase3_blood_traits.py       # blood trait replication
+├── distribution_figures.py      # distribution + LFC-bin figures → lfc_bin_comparison.csv
+├── blood_trait_replication.py   # blood trait replication (--from-cache)
 ├── make_hero_figure.py          # README hero figure
 ├── gwas_catalog.py              # GWAS Catalog v2 client
 ├── allele_resolver.py           # Ensembl allele resolution + cache
 │
+│  # ── Author-suggested extensions (scaffolded, not yet run) ──
+├── dnase_atac_recalibration.py  # matched re-cal under DNase/ATAC tracks (fail-loud TODO)
+├── phred_scale_check.py         # compare SDK phred values vs local transforms (fail-loud TODO)
+│
 ├── scoring/                     # AlphaGenome scoring utilities
 ├── verification/                # canonical variant test harness
-├── tests/                       # unit tests
+├── tests/                       # unit + numeric smoke suite (test_reproduce_numbers.py)
 ├── notebooks/                   # Colab-runnable reproduction notebook
 ├── figures/                     # all generated figures
 ├── docs/                        # methodology + canonical variants + data dictionary
-└── archive/                     # pre-pivot scripts and superseded artifacts
+└── archive/                     # pre-pivot scripts and superseded artifacts (not part of the result)
 ```
 
 All scoring results are included so you can inspect the data or regenerate figures without API access:
@@ -298,6 +307,8 @@ Data sources: Tewhey 2016 MPRA (GSE75661, GRCh38 liftover) · GWAS Catalog v2 ·
 
 **Tissue mismatch.** Raw deltas use K562/blood-lineage tissue profiles. Tewhey 2016 measured regulatory activity in LCLs (lymphoblastoid cell lines), which have different chromatin accessibility and TF occupancy. This mismatch suppresses correlation — ρ = +0.123 is a lower bound on what a correctly matched tissue profile would give.
 
+**One model, one MPRA dataset.** Every number here comes from AlphaGenome v0.6.1 scored against Tewhey 2016. The mechanism — a published per-track quantile composed with a max-over-tracks aggregation it was not calibrated for — is specific to this model's calibration design; whether the same calibration-statistic mismatch appears in Enformer, Sei, Borzoi, or other regulatory models is a hypothesis suggested by this result, not something tested here. Likewise, the matched-calibration recovery (ρ = +0.123) is demonstrated on a single MPRA; it has not been replicated on an independent functional dataset (eQTL effect sizes, a CRISPRi screen, a second MPRA).
+
 **Phred-scaled outputs may be available in newer SDK versions.** This analysis used the published linear quantile from the Nature paper (AlphaGenome SDK v0.6.1). A grep across SDK source, all ten tagged releases, the issue tracker, the docs, and the supplement found no phred-scaled output. The `phred_empirical` reported here is derived locally from the matched null and is a strict monotone transform of the matched quantile; it is not identical to any internal phred convention DeepMind may use.
 
 **Raw / matched output access required.** Recovering the directional signal requires either access to per-track raw outputs or a matched-statistic null. Some tool deployments only expose the published quantile; in those settings, none of the rank-equivalent predictors above can be reconstructed without re-scoring the calibration set.
@@ -313,11 +324,12 @@ The interpretation here rests on a specific causal story. The order-statistic pr
 - **Median or mean aggregation across tracks (DONE).** Replacing max with mean or median on the same K562 raw deltas drops common-variant saturation from 0.42% (max) to 0.00% (mean, median) on identical variants — confirming the order-statistic mechanism. Under the matched-calibration recipe, all three aggregations give essentially identical Tewhey rankings (Spearman ρ within each other's CIs; ~13% saturation under matched quantile regardless of aggregation). The order-statistic effect is real on the null distribution; the residual Tewhey saturation under matched calibration is regulatory enrichment, not an aggregation artifact. See the three-recipe comparison in `analyze_matched_calibration_recipes.py` and `figures/matched_recipes_comparison.png`.
 - **Matched-tissue scoring (NOT RUN).** Re-running raw delta extraction with LCL (lymphoblastoid) tracks instead of K562 should bring the model into the cell type Tewhey 2016 actually measured. If the K562/LCL mismatch is suppressing correlation, matched-tissue ρ should rise. If it stays flat or falls, ρ = +0.123 reflects the model's true ceiling on this dataset rather than a tissue artifact, and the story needs revising.
 
----
+### Next experiments
 
-## Acknowledgments
+Two further checks are **scaffolded but not yet run**. Each is a runnable script with a `make` target that fails loudly if its required inputs are absent and never emits placeholder numbers — so nothing below is a result, only a stated plan.
 
-This analysis was substantially sharpened by feedback from Žiga Avsec (Google DeepMind), who reviewed an earlier version and identified that the published quantile calibration uses single-track summary statistics. The matched-statistic experiment in this work followed directly from that observation.
+- **DNase/ATAC re-calibration** — `make dnase-atac` (`dnase_atac_recalibration.py`). Mirror the expression matched-calibration pipeline exactly, but score under DNase/ATAC accessibility output types. AlphaGenome exposes far fewer accessibility tracks than expression tracks, and the order-statistic inflation grows with track count (1 − (1 − p)ⁿ), so the *unmatched* accessibility max should already saturate less than expression's 41.4% on the common-variant null. The script builds the same matched-vs-unmatched saturation comparison on accessibility tracks. Requires an API key (no accessibility cache is committed).
+- **Phred-scale check** — `make phred-check` (`phred_scale_check.py`). If a newer SDK ships phred-scale quantile values, compare them against (a) the single-track phred transform and (b) the matched-recalibration phred (`phred_empirical`), both computed from committed data, to determine which the SDK's shipped values actually correspond to. AlphaGenome v0.6.1 ships no phred output, so the script fails loud unless phred values are supplied via `--sdk-phred-csv`.
 
 ---
 

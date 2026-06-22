@@ -1,16 +1,16 @@
-"""Phase 3: Generalize saturation finding to blood trait GWAS variants.
+"""Blood-trait replication: generalize the saturation finding beyond Tewhey.
 
 Fetches platelet count (GWAS Catalog EFO_0004615) and hemoglobin
 (EFO_0004611) GWAS variants, scores them via AlphaGenome, and shows
 the saturation CDF replicates on a second independent regulatory-enriched
 dataset distinct from Tewhey MPRA.
 
-Gate 3 threshold: ≥75% of blood trait variants have |expression_subscore| > 0.9.
+Saturation threshold: ≥75% of blood trait variants have |expression_subscore| > 0.9.
 If met → saturation is a general property of regulatory-enriched selection.
-If not → Tewhey-specific, paper framed accordingly.
+If not → Tewhey-specific, framed accordingly.
 
-Run:
-    python phase3_blood_traits.py
+Run from committed cache (no API):
+    python blood_trait_replication.py --from-cache
 """
 
 from __future__ import annotations
@@ -432,7 +432,7 @@ def main() -> None:
     parser.add_argument(
         "--from-cache",
         action="store_true",
-        help="Regenerate the Phase 3 figure from phase3_blood_cache.db without any API calls.",
+        help="Regenerate the blood-trait figure from phase3_blood_cache.db without any API calls.",
     )
     args = parser.parse_args()
 

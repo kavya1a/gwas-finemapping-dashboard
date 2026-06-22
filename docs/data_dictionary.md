@@ -6,7 +6,7 @@ Every parquet / SQLite file committed to the repo, column by column. All artifac
 
 ## `matched_calibration_cache.db` → table `scores`
 
-Per-variant K562 expression summary statistics for the 5,993 random common autosomal SNVs used as the matched-calibration null. 5,933 rows have a clean (error-free) score after 60 errors and 2 timeouts.
+Per-variant K562 expression summary statistics for the 5,993 random common autosomal SNVs scored for the matched-calibration null. 5,933 rows have a clean (error-free) score; the other 60 are API timeouts (dropped from the null).
 
 | Column | Type | Description |
 |---|---|---|
@@ -126,5 +126,5 @@ Ensembl REST API cache for allele resolution. Used by all scoring scripts to can
 ## Reproducibility notes
 
 - Window-sampling RNG seed is **`2026`** (see `config.yaml` → `matched_calibration.seed`). The 66 windows, the 6,000-variant pool cap, and the gnomAD region fetches are all deterministic from this seed.
-- AlphaGenome SDK version pinned to **v0.6.1**. Newer SDK versions may expose different track sets (the `phred_empirical` scale Avsec mentioned in private correspondence appears in later releases).
+- AlphaGenome SDK version pinned to **v0.6.1**. Newer SDK versions may expose different track sets. The `phred_empirical` scale used here is derived locally from the matched null (see `docs/matched_calibration.md`); a grep across SDK source, all ten tagged releases, the issue tracker, the docs, and the Nature supplement found no phred-scaled output in v0.6.1.
 - The K562 tissue profile (`config.yaml` → `tissue_profiles.tewhey_k562`) is a keyword filter; per-variant track counts vary 16 → 3,178 depending on which biosample tags AlphaGenome returns.
